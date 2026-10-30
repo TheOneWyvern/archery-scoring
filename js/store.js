@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   defaultFace: 'full40',
   defaultEntry: 'keypad',
   showTarget: true,
+  // Round a new round starts on: a round id, or 'last' for whichever was used last.
+  defaultType: 'last',
   myName: '',
   // Archers chosen for the last round, offered again for the next one.
   lastArchers: null,

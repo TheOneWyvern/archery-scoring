@@ -315,7 +315,7 @@ function rulesHintHTML() {
 function renderNew() {
   if (!ui.newArchers) ui.newArchers = defaultArchers();
   const s = store.getSettings();
-  const lastType = ROUNDS[s.lastType] ? s.lastType : 'wa18';
+  const lastType = ROUNDS[s.defaultType] ? s.defaultType : ROUNDS[s.lastType] ? s.lastType : 'wa18';
   const roundLabel = t => (t.practice ? `${t.name} · no set length` : `${t.name} · ${t.ends * t.arrowsPerEnd} arrows`);
   const perEndOptions = ['', ...Array.from({ length: 12 }, (_, i) => String(i + 1))]
     .map(v => `<option value="${v}">${v ? `${v} arrow${v === '1' ? '' : 's'}` : 'No limit'}</option>`).join('');
@@ -1137,6 +1137,12 @@ function renderSettings() {
 
       <h2 class="section">Scoring</h2>
       <div class="card form">
+        <label class="field"><span class="field-label">Default round</span>
+          <select data-setting="defaultType">
+            <option value="last">Last round used</option>
+            ${Object.values(ROUNDS).map(t => `<option value="${t.id}" ${t.id === s.defaultType ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+          </select>
+          <small class="muted">The round a new round starts on. You can still change it each time.</small></label>
         <label class="toggle">
           <span><span class="field-label">Target face</span>
             <small class="muted">Plot arrows by tapping on the target. When off, you score with the keypad only.</small></span>
