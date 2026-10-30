@@ -119,11 +119,14 @@ export function roundStats(round) {
   });
   // A practice round's "maximum" is just what the arrows shot so far could have scored.
   const maxArrows = tpl.ends ? tpl.ends * tpl.arrowsPerEnd : arrows;
+  const maxScore = maxArrows * 10;
   return {
     total, tens, xs, arrows, misses, endTotals, running, halfTotals,
     avg: arrows ? total / arrows : 0,
     maxArrows,
-    maxScore: maxArrows * 10,
+    maxScore,
+    // Percentage of the maximum score, rounded to a whole number.
+    pct: maxScore ? Math.round((total / maxScore) * 100) : 0,
     complete: !!tpl.ends && arrows >= maxArrows,
   };
 }

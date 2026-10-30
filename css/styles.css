@@ -305,6 +305,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .totals { text-align: center; }
 .total-big b { font-size: 52px; font-weight: 800; }
 .total-big small { font-size: 20px; color: var(--muted); margin-left: 4px; }
+.total-sub { font-size: 17px; font-weight: 600; color: var(--muted); margin-top: -4px; }
 .total-grid { display: flex; justify-content: center; gap: 4px; margin: 8px 0 12px; }
 .total-grid > div { flex: 1; max-width: 110px; }
 .total-grid b { font-size: 20px; }

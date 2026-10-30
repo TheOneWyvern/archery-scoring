@@ -182,7 +182,7 @@ function roundRow(r) {
       </div>
       <div class="rr-score">${isPractice(r) ? `
         <b>${st.avg.toFixed(2)}</b><small> avg</small>
-        <div class="rr-sub">${st.total} from ${st.arrows} arrows</div>` : `
+        <div class="rr-sub">${st.total}/${st.maxScore} · ${st.pct}%</div>` : `
         <b>${st.total}</b><small>/${st.maxScore}</small>
         <div class="rr-sub">${st.tens}×10${hasX(r.bow) ? ` · ${st.xs}X` : ''}</div>`}
       </div>
@@ -700,7 +700,7 @@ function renderRound() {
     ui.justFinished.delete(round.id);
     const who = named ? `${nameOf(round)}: ` : '';
     if (practice) {
-      banner = `<div class="card banner">${esc(who)}practice saved! <b>${st.arrows} arrows, ${st.avg.toFixed(2)} avg</b></div>`;
+      banner = `<div class="card banner">${esc(who)}practice saved! <b>${st.total}/${st.maxScore} (${st.pct}%), ${st.avg.toFixed(2)} avg</b></div>`;
     } else {
       const pb = isPersonalBest(round) && store.getRounds().filter(r => r.finishedAt && configKey(r) === configKey(round)).length > 1;
       banner = `<div class="card banner ${pb ? 'pb' : ''}">${pb ? `🏆 ${esc(who)}new personal best!` : `${esc(who)}round complete!`} <b>${st.total}/${st.maxScore}</b></div>`;
@@ -735,7 +735,8 @@ function renderRound() {
       ${banner}
       <div class="card totals">
         ${named ? `<div class="card-name">${esc(nameOf(round))}</div>` : ''}
-        <div class="total-big"><b>${st.total}</b><small>${practice ? ` from ${st.arrows} arrows` : `/ ${st.maxScore}`}</small></div>
+        <div class="total-big"><b>${st.total}</b><small>/ ${st.maxScore}</small></div>
+        ${practice ? `<div class="total-sub">${st.pct}% · ${st.arrows} arrow${st.arrows === 1 ? '' : 's'}</div>` : ''}
         <div class="total-grid">
           <div><small>10s</small><b>${st.tens}</b></div>
           ${hasX(round.bow) ? `<div><small>Xs</small><b>${st.xs}</b></div>` : ''}
@@ -761,7 +762,7 @@ function shareText(round) {
   const who = showNames() ? nameOf(round) + ' · ' : '';
   const tens = `${st.tens}×10${hasX(round.bow) ? `, ${st.xs}X` : ''}`;
   if (isPractice(round)) {
-    return `${who}${describeConfig(round)}\n${fmtDate(round.date)}: ${st.total} from ${st.arrows} arrows, ${st.avg.toFixed(2)} avg (${tens})`;
+    return `${who}${describeConfig(round)}\n${fmtDate(round.date)}: ${st.total}/${st.maxScore} (${st.pct}%) from ${st.arrows} arrows, ${st.avg.toFixed(2)} avg (${tens})`;
   }
   return `${who}${ROUNDS[round.type].name} · ${describeConfig(round)}\n${fmtDate(round.date)}: ${st.total}/${st.maxScore} (${tens})`;
 }
