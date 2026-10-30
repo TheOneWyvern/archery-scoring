@@ -76,6 +76,13 @@ function toast(msg, action) {
 
 store.setSaveErrorHandler(() => toast('Could not save. Phone storage may be full.'));
 
+// Pinch zoom is blocked through the viewport tag. Chrome's "Force enable zoom" accessibility option still overrides it.
+function applyZoom() {
+  const base = 'width=device-width, initial-scale=1, viewport-fit=cover';
+  $('meta[name="viewport"]').content = store.getSettings().allowZoom ? base : `${base}, maximum-scale=1, user-scalable=no`;
+}
+applyZoom();
+
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
@@ -1239,6 +1246,15 @@ function renderSettings() {
           Shaft sizes like "2315" or "23" mean 23/64 inch, which is about 9.1mm.</p>` : ''}
       </div>
 
+      <h2 class="section">Screen</h2>
+      <div class="card form">
+        <label class="toggle">
+          <span><span class="field-label">Pinch to zoom</span>
+            <small class="muted">Lets you zoom in on the app with two fingers.</small></span>
+          <input type="checkbox" role="switch" data-setting="allowZoom" ${s.allowZoom ? 'checked' : ''}>
+        </label>
+      </div>
+
       <h2 class="section">Backup</h2>
       <div class="card">
         <p class="muted small-print">Your scores are saved only on this phone. Export a backup now and then so you don't lose them if you change phones or clear Chrome's data.</p>
@@ -1410,6 +1426,7 @@ document.addEventListener('change', async e => {
     store.updateSettings({ [key]: value });
     // The shaft diameter field only shows while the target face is on.
     if (key === 'showTarget') render();
+    if (key === 'allowZoom') applyZoom();
     toast('Saved');
     return;
   }

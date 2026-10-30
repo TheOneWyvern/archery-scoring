@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS = {
   showTarget: true,
   // Round a new round starts on: a round id, or 'last' for whichever was used last.
   defaultType: 'last',
+  // Pinch zoom is off unless turned on, so the app feels like an app rather than a web page.
+  allowZoom: false,
   myName: '',
   // Archers chosen for the last round, offered again for the next one.
   lastArchers: null,
