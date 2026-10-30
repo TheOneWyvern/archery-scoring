@@ -2,7 +2,7 @@
 
 A phone app for scoring indoor archery rounds. It installs from Chrome onto your home screen and works offline.
 
-**Open the app: https://chosenfallen.github.io/archery-scoring/**
+**Open the app: https://theonewyvern.github.io/archery-scoring/**
 
 ## What it does
 
@@ -19,7 +19,7 @@ Scores are stored only in the phone's browser storage. Nothing is uploaded.
 
 ## Install on Android
 
-1. Open https://chosenfallen.github.io/archery-scoring/ in **Chrome**.
+1. Open https://theonewyvern.github.io/archery-scoring/ in **Chrome**.
 2. Tap **⋮** → **Install app** (or **Add to Home screen**).
 
 ## Run locally
