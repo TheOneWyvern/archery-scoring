@@ -4,9 +4,10 @@ import {
 } from './rules.js';
 import * as store from './store.js';
 import {
-  faceSVG, singleSpotSVG, hitTest, markerSVG, plotted, groupCentre, centreSVG, describeOffset,
+  faceSVG, singleSpotSVG, hitTest, markerSVG, plotted, groupCentre, describeOffset,
   hasPos, snapToScore, markerPos,
 } from './face.js';
+import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
 
 // How far above the finger the arrow marker sits while placing it on the target.
 const TOUCH_OFFSET_PX = 56;
@@ -41,7 +42,8 @@ function arrowNear(svg, face, arrows, p, single) {
 const app = document.getElementById('app');
 const modal = document.getElementById('modal');
 const ui = {
-  editing: null, restoring: false, justFinished: new Set(),
+  // sheet is the open bottom sheet other than editing: 'share' or 'plot'. plot is the arrow plot on screen.
+  editing: null, restoring: false, sheet: null, plot: null, justFinished: new Set(),
   historyFilter: 'all', statsArcher: null, statsConfig: null, newArchers: null,
 };
 
@@ -162,6 +164,8 @@ function render() {
 window.addEventListener('hashchange', () => {
   ui.editing = null;
   ui.restoring = false;
+  ui.sheet = null;
+  ui.plot = null;
   // Start each visit to the new round screen from the remembered archers.
   if (parseRoute().name !== 'new') ui.newArchers = null;
   render();
@@ -719,13 +723,12 @@ function renderRound() {
       </button>`).join('')}
     </div>` : '';
 
-  const plot = pts.length ? (() => {
-    const c = groupCentre(arrows);
-    const dots = pts.map(a => markerSVG(round.face, a, { cls: 'mk dot', r: 0.45, single: true })).join('');
-    return `
+  ui.plot = pts.length
+    ? { face: round.face, arrows, caption: `${pts.length} plotted arrows. ${describeOffset(groupCentre(arrows))}`, file: `${fileBase(round)}-plot.png` }
+    : null;
+  const plot = ui.plot ? `
       <h2 class="section">Arrow plot</h2>
-      <div class="card plot">${singleSpotSVG(round.face, dots + centreSVG(c))}<p class="muted">${pts.length} plotted arrows. ${esc(describeOffset(c))}</p></div>`;
-  })() : '';
+      ${plotCardHTML()}` : '';
 
   app.innerHTML = shell({
     title: round.finishedAt ? 'Scorecard' : 'Scorecard (in progress)',
@@ -755,6 +758,82 @@ function renderRound() {
         <button type="button" class="btn danger" data-action="delete-round">Delete round</button>
       </div>`,
   });
+}
+
+// The arrow plot on screen as a card. Tapping it opens it larger, to save or share.
+const plotCardHTML = () => `
+  <button type="button" class="card plot" data-action="plot-open" aria-label="Enlarge arrow plot">
+    ${plotSVG(ui.plot.face, ui.plot.arrows)}<p class="muted">${esc(ui.plot.caption)} Tap to enlarge.</p>
+  </button>`;
+
+// Start of a file name for this round, e.g. archery-2026-10-30-sam.
+function fileBase(round) {
+  const who = showNames() ? nameOf(round).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : '';
+  return `archery-${round.date}${who ? `-${who}` : ''}`;
+}
+
+// The heading and lines at the top of a scorecard picture.
+function scorecardHeading(round) {
+  const title = isPractice(round) ? describeConfig(round) : `${ROUNDS[round.type].name} · ${describeConfig(round)}`;
+  const when = fmtDate(round.date) + (round.location ? ` · ${round.location}` : '');
+  return showNames() ? { heading: nameOf(round), lines: [title, when] } : { heading: title, lines: [when] };
+}
+
+// Runs a share action, showing what went wrong if it fails.
+async function attempt(fn) {
+  try { await fn(); } catch (e) { console.error(e); toast('Could not share'); }
+}
+
+async function shareScorecardImage(round) {
+  const blob = await scorecardPNG(round, scorecardHeading(round));
+  if (!await shareFile(blob, `${fileBase(round)}.png`)) toast('Scorecard picture saved to Downloads');
+}
+
+// This round on its own, in the same format as a backup so it can be imported.
+async function shareRoundData(round) {
+  const people = store.getPeople().filter(p => p.id === archerOf(round));
+  const json = JSON.stringify({ app: 'archery-scoring', version: 1, exportedAt: new Date().toISOString(), rounds: [round], people }, null, 2);
+  if (!await shareFile(new Blob([json], { type: 'application/json' }), `${fileBase(round)}.json`)) toast('Round saved to Downloads');
+}
+
+// Printing the scorecard is how it becomes a PDF: the print menu offers "Save as PDF".
+function printScorecard(round) {
+  closeModal();
+  if (typeof window.print !== 'function') { toast('Printing is not available here'); return; }
+  const title = document.title;
+  document.title = fileBase(round);
+  window.addEventListener('afterprint', () => { document.title = title; }, { once: true });
+  window.print();
+}
+
+function renderShareSheet() {
+  modal.hidden = false;
+  modal.innerHTML = `
+    <div class="sheet" role="dialog" aria-label="Share score">
+      <h2>Share score</h2>
+      <div class="stack">
+        <button type="button" class="btn block share-opt" data-action="share-image"><b>Picture</b><small>The whole scorecard as an image</small></button>
+        <button type="button" class="btn block share-opt" data-action="share-text"><b>Text</b><small>A short summary with the total</small></button>
+        <button type="button" class="btn block share-opt" data-action="share-pdf"><b>PDF</b><small>Print the scorecard, or choose Save as PDF</small></button>
+        <button type="button" class="btn block share-opt" data-action="share-json"><b>Data file</b><small>This round as .json, which Import backup can read</small></button>
+      </div>
+      <button type="button" class="btn block" data-action="modal-close">Cancel</button>
+    </div>`;
+}
+
+function renderPlotSheet() {
+  modal.hidden = false;
+  modal.innerHTML = `
+    <div class="sheet" role="dialog" aria-label="Arrow plot">
+      <h2>Arrow plot</h2>
+      <div class="plot-big">${plotSVG(ui.plot.face, ui.plot.arrows)}</div>
+      <p class="muted">${esc(ui.plot.caption)}</p>
+      <div class="row-actions">
+        <button type="button" class="btn" data-action="plot-download">Download</button>
+        ${canShareFiles() ? '<button type="button" class="btn primary" data-action="plot-share">Share</button>' : ''}
+      </div>
+      <button type="button" class="btn block" data-action="modal-close">Close</button>
+    </div>`;
 }
 
 function shareText(round) {
@@ -855,11 +934,14 @@ function bindEditPlot(round, ed) {
 function closeModal() {
   ui.editing = null;
   ui.restoring = false;
+  ui.sheet = null;
   renderModal();
 }
 
 function renderModal() {
   if (ui.restoring) return renderRestoreSheet();
+  if (ui.sheet === 'share') return renderShareSheet();
+  if (ui.sheet === 'plot' && ui.plot) return renderPlotSheet();
   const ed = ui.editing;
   if (!ed) { modal.hidden = true; modal.innerHTML = ''; return; }
   const round = store.getRound(ed.roundId);
@@ -1074,11 +1156,12 @@ function renderStats() {
 
   const recentArrows = rounds.slice(0, 10).flatMap(r => r.ends.flat());
   const pts = plotted(recentArrows);
-  const c = groupCentre(recentArrows);
-  const plot = pts.length ? `
+  ui.plot = pts.length
+    ? { face: sample.face, arrows: recentArrows, caption: `${pts.length} plotted arrows. ${describeOffset(groupCentre(recentArrows))}`, file: `archery-grouping-${today()}.png` }
+    : null;
+  const plot = ui.plot ? `
     <h2 class="section">Grouping <small class="muted">${n > 1 ? `last ${Math.min(10, n)} ${practice ? 'sessions' : 'rounds'}` : ''}</small></h2>
-    <div class="card plot">${singleSpotSVG(sample.face, pts.map(a => markerSVG(sample.face, a, { cls: 'mk dot', r: 0.4, single: true })).join('') + centreSVG(c))}
-    <p class="muted">${pts.length} plotted arrows. ${esc(describeOffset(c))}</p></div>` : '';
+    ${plotCardHTML()}` : '';
 
   const chrono = [...rounds].reverse().slice(-30);
 
@@ -1265,7 +1348,14 @@ document.addEventListener('click', e => {
       toast('End updated');
       break;
     }
-    case 'share': share(round); break;
+    case 'share': ui.sheet = 'share'; renderModal(); break;
+    case 'share-text': closeModal(); share(round); break;
+    case 'share-image': closeModal(); attempt(() => shareScorecardImage(round)); break;
+    case 'share-pdf': printScorecard(round); break;
+    case 'share-json': closeModal(); attempt(() => shareRoundData(round)); break;
+    case 'plot-open': ui.sheet = 'plot'; renderModal(); break;
+    case 'plot-share': attempt(async () => { await shareFile(await plotPNG(ui.plot.face, ui.plot.arrows), ui.plot.file); }); break;
+    case 'plot-download': attempt(async () => { saveFile(await plotPNG(ui.plot.face, ui.plot.arrows), ui.plot.file); toast('Plot saved to Downloads'); }); break;
     case 'delete-round':
       if (confirm('Delete this round? This cannot be undone.')) {
         store.deleteRound(round.id);

@@ -35,6 +35,7 @@ Then open http://localhost:8080.
 - `index.html`, `css/styles.css`: page and styles
 - `js/rules.js`: round definitions and scoring rules
 - `js/face.js`: target face drawing and hit testing
+- `js/share.js`: scorecard and arrow plot pictures for sharing
 - `js/store.js`: saving to phone storage, backup import and export
 - `js/app.js`: screens and interactions
 - `sw.js`, `manifest.webmanifest`, `icons/`: offline support and installing to the home screen

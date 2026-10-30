@@ -329,6 +329,27 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .plot { text-align: center; }
 .plot .face { width: 100%; max-width: 320px; }
 .plot p { font-size: 14px; margin: 8px 0 0; }
+button.plot { display: block; width: 100%; border: 0; font: inherit; color: inherit; cursor: pointer; }
+button.plot:active { background: var(--surface-2); }
+.plot-big { display: flex; justify-content: center; }
+.plot-big .face { width: 100%; max-height: 60dvh; border-radius: 12px; }
+
+/* ---------- sharing ---------- */
+
+.btn.share-opt { flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 16px; text-align: left; }
+.share-opt small { font-weight: 400; font-size: 13px; color: var(--muted); }
+
+/* Printing the scorecard (or saving it as a PDF) shows just the card, in light colours. */
+@media print {
+  :root {
+    --bg: #ffffff; --surface: #ffffff; --surface-2: #e8ecf1; --text: #15202b; --muted: #5f6b78;
+    --line: #d5dbe2; --boss: #d9d4c7; --shadow: none; color-scheme: light;
+  }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .topbar, .tabbar, .archer-tabs, .row-actions, .small-print, .btn, .modal, .toast { display: none !important; }
+  .plot p { display: none; }
+  .card, .scorecard { break-inside: avoid; border: 1px solid var(--line); }
+}
 
 /* ---------- stats ---------- */
 
