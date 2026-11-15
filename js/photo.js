@@ -25,38 +25,39 @@ export function defaultSpots(face, w, h) {
   return geometry(face).spots.map(p => ({ x: w / 2 + p.x * scale, y: h / 2 + p.y * scale, L: [[scale, 0], [0, scale]] }));
 }
 
-// The handles for lining up the spots: each spot's centre and right edge, and on a full face its top
-// edge too, for photos taken at a slant. A triple spot's spots are small, so they get two handles each.
+// The four edge handles of a spot: where its edge ring (edgeCm) crosses the left-right and up-down
+// lines through its centre, in cm.
+const SIDES = { right: [1, 0], left: [-1, 0], bottom: [0, 1], top: [0, -1] };
+
+// The handles for lining up the spots: each spot's centre, and its edge ring at the right, left, top
+// and bottom.
 export function handlesFor(face, spots) {
   const R = edgeCm(face);
   return spots.flatMap((s, i) => [
     { spot: i, kind: 'centre', ...spotToPhoto(s, 0, 0) },
-    { spot: i, kind: 'right', ...spotToPhoto(s, R, 0) },
-    ...(face === 'triple40' ? [] : [{ spot: i, kind: 'top', ...spotToPhoto(s, 0, -R) }]),
+    ...Object.entries(SIDES).map(([kind, [u, v]]) => ({ spot: i, kind, ...spotToPhoto(s, u * R, v * R) })),
   ]);
 }
 
-// Moves a handle to `pt`. The centre moves the whole spot. On a full face the right and top handles
-// set the spot's width and height directions separately; on a triple spot the edge handle turns and
-// resizes the spot, keeping its shape.
+// Moves a handle to `pt`. The centre moves the whole spot. An edge handle moves just that side of the
+// ring: the opposite side stays where it is, and the spot's centre and width (or height) follow, so
+// the ring stretches like pulling one side of a band.
 export function moveHandle(face, spots, h, pt) {
   const s = spots[h.spot];
-  const R = edgeCm(face);
   if (h.kind === 'centre') {
     s.x = pt.x;
     s.y = pt.y;
-  } else if (h.kind === 'top') {
-    s.L = [[s.L[0][0], -(pt.x - s.x) / R], [s.L[1][0], -(pt.y - s.y) / R]];
-  } else if (face === 'triple40') {
-    const old = spotToPhoto(s, R, 0);
-    const a0 = Math.atan2(old.y - s.y, old.x - s.x), a1 = Math.atan2(pt.y - s.y, pt.x - s.x);
-    const k = Math.hypot(pt.x - s.x, pt.y - s.y) / Math.hypot(old.x - s.x, old.y - s.y);
-    const cs = Math.cos(a1 - a0) * k, sn = Math.sin(a1 - a0) * k;
-    const [[a, b], [c, d]] = s.L;
-    s.L = [[cs * a - sn * c, cs * b - sn * d], [sn * a + cs * c, sn * b + cs * d]];
-  } else {
-    s.L = [[(pt.x - s.x) / R, s.L[0][1]], [(pt.y - s.y) / R, s.L[1][1]]];
+    return;
   }
+  const R = edgeCm(face);
+  const [u, v] = SIDES[h.kind];
+  // The column of L for this handle's direction (0 across, 1 down), and which way along it the handle is.
+  const col = u ? 0 : 1, sign = u || v;
+  const opposite = spotToPhoto(s, -u * R, -v * R);
+  const half = { x: (pt.x - opposite.x) / 2, y: (pt.y - opposite.y) / 2 };
+  s.x = opposite.x + half.x;
+  s.y = opposite.y + half.y;
+  s.L = s.L.map((row, k) => row.map((val, j) => (j === col ? (sign * (k ? half.y : half.x)) / R : val)));
 }
 
 // Which spot a photo position belongs to, and where it is on that spot in centimetres.
