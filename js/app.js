@@ -19,6 +19,8 @@ const TOUCH_OFFSET_PX = 56;
 const GRAB_PX = 22;
 // How far the pointer must travel before a touch counts as a drag rather than a tap.
 const DRAG_PX = 6;
+// Scoring from a photo is hidden while its ring finding is made more accurate (dev/ring-checker.html).
+const PHOTO_SCORING = false;
 
 // Converts screen coordinates to the face's centimetre coordinates.
 function toFace(svg, x, y) {
@@ -569,7 +571,7 @@ function renderScore() {
           <button type="button" data-action="mode" data-m="keypad" class="${mode === 'keypad' ? 'on' : ''}">Keypad</button>
           <button type="button" data-action="mode" data-m="target" class="${mode === 'target' ? 'on' : ''}">Target</button>
         </div>` : ''}
-        ${full ? '' : `<button type="button" class="btn photo-btn" data-action="photo-source">${ICONS.camera}<span>Photo</span></button>`}
+        ${full || !PHOTO_SCORING ? '' : `<button type="button" class="btn photo-btn" data-action="photo-source">${ICONS.camera}<span>Photo</span></button>`}
       </div>
       <div class="entry mode-${mode}">${entry}</div>
       <div class="score-actions">
