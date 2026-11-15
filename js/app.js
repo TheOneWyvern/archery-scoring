@@ -798,9 +798,51 @@ function renderRound() {
       ${plot}
       <div class="row-actions">
         <button type="button" class="btn" data-action="share">Share score</button>
-        <button type="button" class="btn danger" data-action="delete-round">Delete round</button>
-      </div>`,
+        <button type="button" class="btn" data-action="details-open">Edit details</button>
+      </div>
+      <button type="button" class="btn danger block delete-round" data-action="delete-round">Delete round</button>`,
   });
+}
+
+// Changes a round's bow, date, location, notes, and the age group and category it's classified by.
+// The bow can only change to one that scores the same way: compound has no X, so its arrows can't be
+// rescored as another bow's, or the other way round. The face can't change, as scores depend on it.
+function renderDetailsSheet() {
+  const round = store.getRound(current.id);
+  const bows = Object.entries(BOWS).filter(([k]) => hasX(k) === hasX(round.bow));
+  const opt = (k, l, v) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`;
+  modal.hidden = false;
+  modal.innerHTML = `
+    <div class="sheet form" role="dialog" aria-label="Edit round details">
+      <h2>Round details</h2>
+      <label class="field"><span class="field-label">Bow</span>
+        <select id="d-bow">${bows.map(([k, l]) => opt(k, l, round.bow)).join('')}</select>
+        <small class="muted">${round.bow === 'compound' ? 'A compound round can\'t change to another bow, as they score the inner ring differently.' : 'Compound isn\'t offered, as it scores the inner ring differently.'}</small></label>
+      <div class="field"><span class="field-label">Classification group</span>
+        ${profileSelectsHTML(profileOf(round), f => `id="d-${f}"`)}</div>
+      <label class="field"><span class="field-label">Date</span><input type="date" id="d-date" value="${esc(round.date)}" required></label>
+      <label class="field"><span class="field-label">Location <small>(optional)</small></span><input type="text" id="d-location" value="${esc(round.location)}" maxlength="80"></label>
+      <label class="field"><span class="field-label">Notes <small>(optional)</small></span><textarea id="d-notes" rows="2" maxlength="500">${esc(round.notes)}</textarea></label>
+      <div class="row-actions">
+        <button type="button" class="btn" data-action="modal-close">Cancel</button>
+        <button type="button" class="btn primary" data-action="details-save">Save</button>
+      </div>
+    </div>`;
+}
+
+function saveDetails(round) {
+  const val = id => $(`#d-${id}`).value;
+  if (!val('date')) { toast('Choose a date'); return; }
+  Object.assign(round, {
+    bow: val('bow'), date: val('date'), location: val('location').trim(), notes: val('notes').trim(),
+  });
+  // The group is kept on the round only once both are chosen.
+  if (val('age') && val('gender')) Object.assign(round, { age: val('age'), gender: val('gender') });
+  else { delete round.age; delete round.gender; }
+  store.updateRound(round);
+  closeModal();
+  render();
+  toast('Round updated');
 }
 
 // The Archery GB class a complete WA 18m round reaches, and how close it came to the next one.
@@ -1029,6 +1071,7 @@ function renderModal() {
   if (ui.restoring) return renderRestoreSheet();
   if (ui.sheet === 'share') return renderShareSheet();
   if (ui.sheet === 'plot' && ui.plot) return renderPlotSheet();
+  if (ui.sheet === 'details') return renderDetailsSheet();
   const ed = ui.editing;
   if (!ed) { modal.hidden = true; modal.innerHTML = ''; return; }
   const round = store.getRound(ed.roundId);
@@ -1453,6 +1496,8 @@ document.addEventListener('click', e => {
       break;
     }
     case 'share': ui.sheet = 'share'; renderModal(); break;
+    case 'details-open': ui.sheet = 'details'; renderModal(); break;
+    case 'details-save': saveDetails(round); break;
     case 'share-text': closeModal(); share(round); break;
     case 'share-image': closeModal(); attempt(() => shareScorecardImage(round)); break;
     case 'share-pdf': printScorecard(round); break;
