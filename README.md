@@ -12,6 +12,7 @@ A phone app for scoring indoor archery rounds. It installs from Chrome onto your
 - **Practice rounds:** no set length, with a fixed number of arrows per end or no limit.
 - **Two ways to enter scores:** a keypad, or touching and dragging on the target face. Arrows touching a line score the higher ring, taking your arrow shaft diameter into account. Tap an arrow on the target to move it or change its score.
 - **Scorecard:** arrows sorted highest first, end and running totals, half subtotals, and 10 and X counts. Tap any end to correct it.
+- **Classifications:** a complete WA 18m round shows the Archery GB indoor class it reaches and how far it is from the next one, and Stats shows progress towards claiming each class. Set each archer's age group and category in Settings.
 - **History and stats:** personal bests, score trend, first vs second half averages, score distribution and an arrow grouping plot.
 - **Backup:** export and import as JSON, and export to CSV for spreadsheets.
 
@@ -36,6 +37,7 @@ Then open http://localhost:8080.
 - `js/rules.js`: round definitions and scoring rules
 - `js/face.js`: target face drawing and hit testing
 - `js/share.js`: scorecard and arrow plot pictures for sharing
+- `js/classes.js`: Archery GB indoor classification scores for the WA 18m round
 - `js/store.js`: saving to phone storage, backup import and export
 - `js/app.js`: screens and interactions
 - `sw.js`, `manifest.webmanifest`, `icons/`: offline support and installing to the home screen

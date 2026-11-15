@@ -221,6 +221,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .person-row { display: flex; align-items: center; gap: 8px; }
 .person-row small { flex: none; }
 .person-row .btn { min-height: 44px; }
+.person { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.profile-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.profile-opts select {
+  width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+}
+
+/* ---------- classifications ---------- */
+
+.class-card p { margin: 4px 0 0; font-size: 15px; }
+.class-reached { margin-top: 6px; font-size: 19px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.class-code {
+  flex: none; display: inline-grid; place-items: center; min-width: 52px; padding: 2px 8px; border-radius: 8px;
+  background: var(--surface-2); font-size: 14px; font-weight: 800; letter-spacing: 0.03em;
+}
+.class-list { display: grid; gap: 10px; }
+.class-row { display: flex; align-items: center; gap: 12px; }
+.class-row div { display: grid; }
+.class-row small { color: var(--muted); font-size: 13px; }
+.class-row.todo { opacity: 0.6; }
+.class-list .small-print { margin: 4px 0 0; }
 
 .hint { margin: 0; padding: 12px 14px; font-size: 14px; border-left: 4px solid var(--blue); }
 .hint p { margin: 4px 0; }

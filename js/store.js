@@ -13,6 +13,9 @@ const DEFAULT_SETTINGS = {
   // Pinch zoom is off unless turned on, so the app feels like an app rather than a web page.
   allowZoom: false,
   myName: '',
+  // Your age group and men's or women's category, for classifications ('' until set).
+  myAge: '',
+  myGender: '',
   // Archers chosen for the last round, offered again for the next one.
   lastArchers: null,
 };
@@ -96,6 +99,19 @@ export function renamePerson(id, name) {
   if (p) { p.name = name; save(); }
 }
 
+// Changes a person's age group or category.
+export function updatePerson(id, patch) {
+  const p = data.people.find(x => x.id === id);
+  if (p) { Object.assign(p, patch); save(); }
+}
+
+// An archer's age group and men's or women's category, used for classifications.
+export function archerProfile(id) {
+  if (!id || id === ME) return { age: data.settings.myAge || '', gender: data.settings.myGender || '' };
+  const p = data.people.find(x => x.id === id);
+  return { age: p?.age || '', gender: p?.gender || '' };
+}
+
 export function deletePerson(id) {
   data.people = data.people.filter(p => p.id !== id);
   save();
@@ -123,7 +139,7 @@ export function importJSON(text) {
   if (!d || !Array.isArray(d.rounds)) throw new Error('This file is not an archery scoring backup.');
   const knownPeople = new Set(data.people.map(p => p.id));
   for (const p of Array.isArray(d.people) ? d.people : []) {
-    if (p && p.id && p.name && !knownPeople.has(p.id)) data.people.push({ id: p.id, name: p.name });
+    if (p && p.id && p.name && !knownPeople.has(p.id)) data.people.push({ id: p.id, name: p.name, age: p.age || '', gender: p.gender || '' });
   }
   const existing = new Set(data.rounds.map(r => r.id));
   let added = 0;

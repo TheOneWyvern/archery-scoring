@@ -1,6 +1,6 @@
 // Offline support: the app's files are cached on first visit so it works at the range without signal.
 // Bump VERSION when the list of files changes.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `archery-${VERSION}`;
 const FILES = [
   './',
@@ -12,6 +12,7 @@ const FILES = [
   'js/store.js',
   'js/face.js',
   'js/share.js',
+  'js/classes.js',
   'icons/icon.svg',
   'icons/icon-180.png',
   'icons/icon-192.png',

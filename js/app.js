@@ -8,6 +8,7 @@ import {
   hasPos, snapToScore, markerPos,
 } from './face.js';
 import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
+import { CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, classify, hasClassTable } from './classes.js';
 
 // How far above the finger the arrow marker sits while placing it on the target.
 const TOUCH_OFFSET_PX = 56;
@@ -112,6 +113,22 @@ const nameOf = r => store.archerName(archerOf(r));
 // Names are only shown once more than one archer has been used, so a solo archer sees no change.
 const showNames = () => store.getPeople().length > 0 || store.getRounds().some(r => archerOf(r) !== store.ME);
 
+// A round is judged by the archer's age group and category when it was shot, or their current ones
+// for rounds from before these were recorded.
+const profileOf = r => (r.age && r.gender ? { age: r.age, gender: r.gender } : store.archerProfile(archerOf(r)));
+const classOf = r => classify(r, profileOf(r));
+const possessive = r => (archerOf(r) === store.ME ? 'your' : `${nameOf(r)}'s`);
+
+// Age group and category pickers. `attrs(field)` gives each select's data attributes.
+function profileSelectsHTML(prof, attrs) {
+  const opts = (map, value) => Object.entries(map).map(([k, l]) => `<option value="${k}" ${k === value ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  return `
+    <div class="profile-opts">
+      <select ${attrs('age')} aria-label="Age group"><option value="">Age group…</option>${opts(AGE_GROUPS, prof.age)}</select>
+      <select ${attrs('gender')} aria-label="Category"><option value="">Category…</option>${opts(GENDERS, prof.gender)}</select>
+    </div>`;
+}
+
 function currentEnd(round) { return round.ends[round.ends.length - 1]; }
 const singleSpotEntry = round => round.face === 'triple40';
 // Whether no more arrows fit in this end. A practice end with no limit is never full.
@@ -185,6 +202,7 @@ function roundRow(r) {
   const st = roundStats(r);
   const status = r.finishedAt ? '' : '<span class="badge">In progress</span>';
   const named = showNames();
+  const reached = classOf(r)?.reached;
   return `
     <a class="round-row" href="#/round/${r.id}">
       <div>
@@ -195,7 +213,7 @@ function roundRow(r) {
         <b>${st.avg.toFixed(2)}</b><small> avg</small>
         <div class="rr-sub">${st.total}/${st.maxScore} · ${st.pct}%</div>` : `
         <b>${st.total}</b><small>/${st.maxScore}</small>
-        <div class="rr-sub">${st.tens}×10${hasX(r.bow) ? ` · ${st.xs}X` : ''}</div>`}
+        <div class="rr-sub">${st.tens}×10${hasX(r.bow) ? ` · ${st.xs}X` : ''}${reached ? ` · ${reached.code}` : ''}</div>`}
       </div>
     </a>`;
 }
@@ -414,7 +432,9 @@ function renderNew() {
       groupId,
     };
     const chosen = rows.map(a => ({ ...a, who: a.who === 'new' ? store.addPerson(a.newName.trim()).id : a.who }));
-    const rounds = chosen.map((a, seat) => ({ ...base, id: uid() + seat, archerId: a.who, seat, bow: a.bow, face: a.face, ends: [[]] }));
+    // Each round keeps the archer's age group and category, so growing up a group doesn't change old classifications.
+    const snapshot = who => { const p = store.archerProfile(who); return p.age && p.gender ? p : {}; };
+    const rounds = chosen.map((a, seat) => ({ ...base, id: uid() + seat, archerId: a.who, seat, bow: a.bow, face: a.face, ...snapshot(a.who), ends: [[]] }));
     rounds.forEach(store.addRound);
 
     store.updateSettings({
@@ -756,6 +776,7 @@ function renderRound() {
         <div class="muted meta">${esc(fmtDate(round.date))} · ${practice ? '' : esc(tpl.name) + ' · '}${esc(describeConfig(round))}${round.location ? ' · ' + esc(round.location) : ''}</div>
         ${round.notes ? `<p class="notes">${esc(round.notes)}</p>` : ''}
       </div>
+      ${classCardHTML(round)}
       ${round.finishedAt ? '' : `<a class="btn primary block" href="#/score/${round.id}">Continue scoring</a>`}
       <p class="muted small-print">Tap an end to correct it.</p>
       ${scorecardHTML(round)}
@@ -765,6 +786,48 @@ function renderRound() {
         <button type="button" class="btn danger" data-action="delete-round">Delete round</button>
       </div>`,
   });
+}
+
+// The Archery GB class a complete WA 18m round reaches, and how close it came to the next one.
+function classCardHTML(round) {
+  if (round.type !== 'wa18' || !roundStats(round).complete) return '';
+  const card = body => `<div class="card class-card"><div class="card-label">Classification</div>${body}</div>`;
+  if (!hasClassTable(round)) return card(`<p class="muted">Archery GB has no indoor classification table for ${esc(BOWS[round.bow].toLowerCase())}s.</p>`);
+  const c = classOf(round);
+  if (!c) return card(`<p class="muted">Set ${esc(possessive(round))} age group and category in <a href="#/settings">Settings</a> to see which class this score reaches.</p>`);
+  return card(`
+    <div class="class-reached">${c.reached ? `<b>${esc(c.reached.name)}</b> <span class="class-code">${c.reached.code}</span>` : '<b>Not at a class yet</b>'}</div>
+    <p class="muted">${c.next ? `${c.short} more point${c.short === 1 ? '' : 's'} for ${esc(c.next.name)} (${c.next.code})` : 'The highest indoor class.'}</p>`);
+}
+
+// Progress towards claiming each class, from every complete round in this archer's bow and face.
+function classProgressHTML(rounds) {
+  if (rounds[0].type !== 'wa18' || !hasClassTable(rounds[0])) return '';
+  const complete = rounds.filter(r => roundStats(r).complete);
+  const results = complete.map(classOf).filter(Boolean);
+  if (!results.length) {
+    return complete.length ? `
+      <h2 class="section">Classifications</h2>
+      <div class="card"><p class="muted">Set ${esc(possessive(rounds[0]))} age group and category in <a href="#/settings">Settings</a> to see classifications.</p></div>` : '';
+  }
+  const best = Math.max(...results.map(c => c.index));
+  const nearest = Math.min(...results.filter(c => c.index === best).map(c => c.short));
+  // Highest class first, starting with the next one still to reach.
+  const rows = CLASSES.slice(0, best + 2).map((cls, i) => {
+    const count = results.filter(c => c.index >= i).length;
+    const need = Math.ceil(CLAIM_ARROWS[cls.tier] / 60);
+    const status = i > best
+      ? `Best score is ${nearest} point${nearest === 1 ? '' : 's'} short`
+      : `${count} round${count === 1 ? '' : 's'} at this level · ${count >= need ? '✓ enough arrows to claim' : `${need - count} more needed`}`;
+    return `<div class="class-row ${i > best ? 'todo' : ''}"><span class="class-code">${cls.code}</span><div><b>${esc(cls.name)}</b><small>${status}</small></div></div>`;
+  }).reverse().join('');
+  return `
+    <h2 class="section">Classifications</h2>
+    <div class="card class-list">${rows}
+      <p class="muted small-print">Each WA 18m round is 60 arrows. Archer classes need 120 arrows at that level from any event,
+        Bowman classes 180 from competitive events, and Master Bowman classes need record status competitions.
+        Ask your club's Records Officer to claim one.</p>
+    </div>`;
 }
 
 // The arrow plot on screen as a card. Tapping it opens it larger, to save or share.
@@ -783,7 +846,9 @@ function fileBase(round) {
 function scorecardHeading(round) {
   const title = isPractice(round) ? describeConfig(round) : `${ROUNDS[round.type].name} · ${describeConfig(round)}`;
   const when = fmtDate(round.date) + (round.location ? ` · ${round.location}` : '');
-  return showNames() ? { heading: nameOf(round), lines: [title, when] } : { heading: title, lines: [when] };
+  const reached = classOf(round)?.reached;
+  const lines = [when, ...(reached ? [`${reached.name} (${reached.code})`] : [])];
+  return showNames() ? { heading: nameOf(round), lines: [title, ...lines] } : { heading: title, lines };
 }
 
 // Runs a share action, showing what went wrong if it fails.
@@ -1182,6 +1247,7 @@ function renderStats() {
         ${[...configs].map(([k, label]) => `<option value="${k}" ${k === ui.statsConfig ? 'selected' : ''}>${esc(label)}</option>`).join('')}
       </select>` : `<p class="muted">${esc(describeConfig(sample))}</p>`}
       <div class="tiles">${tiles}</div>
+      ${classProgressHTML(rounds)}
       <h2 class="section">${practice ? 'Average per arrow' : 'Score trend'}</h2>
       <div class="card">${practice ? trendSVG(chrono, r => roundStats(r).avg, 2) : trendSVG(chrono)}</div>
       ${halfHtml}
@@ -1200,13 +1266,17 @@ function renderSettings() {
   const peopleHtml = store.getPeople().map(p => {
     const n = roundCount(p.id);
     return `
-      <div class="person-row">
-        <input type="text" value="${esc(p.name)}" data-person="${p.id}" maxlength="40" aria-label="Name">
-        ${n
-          ? `<small class="muted">${n} round${n === 1 ? '' : 's'}</small>`
-          : `<button type="button" class="icon-btn remove" data-action="person-delete" data-id="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button>`}
+      <div class="person">
+        <div class="person-row">
+          <input type="text" value="${esc(p.name)}" data-person="${p.id}" maxlength="40" aria-label="Name">
+          ${n
+            ? `<small class="muted">${n} round${n === 1 ? '' : 's'}</small>`
+            : `<button type="button" class="icon-btn remove" data-action="person-delete" data-id="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button>`}
+        </div>
+        ${profileSelectsHTML(store.archerProfile(p.id), f => `data-person-field="${f}" data-id="${p.id}"`)}
       </div>`;
   }).join('');
+  const myProfile = store.archerProfile(store.ME);
 
   app.innerHTML = shell({
     title: 'Settings',
@@ -1214,6 +1284,9 @@ function renderSettings() {
       <div class="card form">
         <label class="field"><span class="field-label">Your name</span>
           <input type="text" value="${esc(s.myName)}" data-setting="myName" placeholder="Shown on your scorecards" maxlength="40" autocomplete="name"></label>
+        <div class="field"><span class="field-label">Classification group</span>
+          ${profileSelectsHTML(myProfile, f => `data-setting="${f === 'age' ? 'myAge' : 'myGender'}"`)}
+          <small class="muted">Your age group and men's or women's tables, used to show Archery GB classifications.</small></div>
       </div>
 
       <h2 class="section">Other archers</h2>
@@ -1223,7 +1296,7 @@ function renderSettings() {
           <input type="text" id="new-person" placeholder="New archer's name" maxlength="40" autocomplete="off">
           <button type="button" class="btn" data-action="person-add">Add</button>
         </div>
-        ${peopleHtml ? '<p class="muted small-print">Tap a name to change it. Archers with rounds can\'t be removed.</p>' : ''}
+        ${peopleHtml ? '<p class="muted small-print">Tap a name to change it. Set each archer\'s age group and category to see their classifications. Archers with rounds can\'t be removed.</p>' : ''}
       </div>
 
       <h2 class="section">Scoring</h2>
@@ -1412,6 +1485,11 @@ document.addEventListener('change', async e => {
     const name = el.value.trim();
     if (!name) { el.value = store.archerName(el.dataset.person); toast('A name is needed'); return; }
     store.renamePerson(el.dataset.person, name);
+    toast('Saved');
+    return;
+  }
+  if (el.dataset.personField) {
+    store.updatePerson(el.dataset.id, { [el.dataset.personField]: el.value });
     toast('Saved');
     return;
   }
