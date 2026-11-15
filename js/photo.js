@@ -1,28 +1,81 @@
 // Scoring from a photo of the target: lining each spot up with the photo, and finding it automatically.
 // Face positions are in centimetres (as in face.js); photo positions are in the photo's pixels.
 //
-// Each spot in the photo is { x, y, L }: its centre, and the 2×2 map L that turns centimetres from
-// that centre into photo pixels. Spots are fitted one by one, because a photo taken at an angle
-// makes nearer spots look bigger than farther ones.
+// Each spot in the photo is { H }: a perspective map, the 3×3 matrix that turns centimetres from the
+// spot's centre into photo pixels. A photo taken at an angle makes the near side of the face look
+// bigger than the far side. That squashes each ring into an oval and moves the smaller rings
+// slightly towards the far side, and the map follows both. Spots are fitted one by one, as nearer
+// spots look bigger too.
 
 import { geometry } from './face.js';
 
-// How far out each spot's edge handle sits: the edge of the blue on a full face (12cm), and the
+// How far out each spot's edge handles sit: the edge of the blue on a full face (12cm), and the
 // edge of a triple spot (10cm).
 export const edgeCm = face => (face === 'triple40' ? 10 : 12);
 
+const apply = (H, u, v) => {
+  const w = H[2][0] * u + H[2][1] * v + H[2][2];
+  return { x: (H[0][0] * u + H[0][1] * v + H[0][2]) / w, y: (H[1][0] * u + H[1][1] * v + H[1][2]) / w };
+};
+
+function invert3(m) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [
+    [A / det, (c * h - b * i) / det, (b * f - c * e) / det],
+    [B / det, (a * i - c * g) / det, (c * d - a * f) / det],
+    [C / det, (b * g - a * h) / det, (a * e - b * d) / det],
+  ];
+}
+
+const mul3 = (a, b) => a.map(row => b[0].map((_, j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j]));
+// The same map with its bottom-right entry 1, which is how it's kept.
+const tidy = H => H.map(row => row.map(v => v / H[2][2]));
+
 // Centimetres from the spot's centre to the photo, and back.
-export const spotToPhoto = (s, u, v) => ({ x: s.x + s.L[0][0] * u + s.L[0][1] * v, y: s.y + s.L[1][0] * u + s.L[1][1] * v });
-export function photoToSpot(s, pt) {
-  const [[a, b], [c, d]] = s.L;
-  const det = a * d - b * c, x = pt.x - s.x, y = pt.y - s.y;
-  return { x: (d * x - b * y) / det, y: (-c * x + a * y) / det };
+export const spotToPhoto = (s, u, v) => apply(s.H, u, v);
+export const photoToSpot = (s, pt) => apply(invert3(s.H), pt.x, pt.y);
+
+// A spot seen straight on (no perspective), centred at (x, y), with L the 2×2 map from cm to pixels.
+export const flatSpot = (x, y, L) => ({ H: [[L[0][0], L[0][1], x], [L[1][0], L[1][1], y], [0, 0, 1]] });
+
+// A spot moved by (dx, dy) pixels, and a spot with its pixels scaled by f.
+const shifted = (s, dx, dy) => ({ H: [s.H[0].map((v, j) => v + dx * s.H[2][j]), s.H[1].map((v, j) => v + dy * s.H[2][j]), s.H[2].slice()] });
+const scaled = (s, f) => ({ H: [s.H[0].map(v => v * f), s.H[1].map(v => v * f), s.H[2].slice()] });
+
+// Pixels per cm around the spot's centre.
+export function spotScale(s) {
+  const H = tidy(s.H), x = H[0][2], y = H[1][2];
+  const j00 = H[0][0] - x * H[2][0], j01 = H[0][1] - x * H[2][1], j10 = H[1][0] - y * H[2][0], j11 = H[1][1] - y * H[2][1];
+  return Math.sqrt(Math.abs(j00 * j11 - j01 * j10));
+}
+
+// An SVG path along the ring r cm out on a spot.
+export function ringPath(s, r, steps = 96) {
+  let d = '';
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    const p = spotToPhoto(s, r * Math.cos(t), r * Math.sin(t));
+    d += `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+  }
+  return `${d}Z`;
+}
+
+// A spot with photo positions as fractions of the photo's width and height, to keep with a round,
+// and back again. Spots kept before perspective ({ x, y, L } in fractions of the width) still read.
+export function spotToFractions(s, w, h) {
+  return { H: tidy([s.H[0].map(v => v / w), s.H[1].map(v => v / h), s.H[2]]).map(row => row.map(v => +v.toPrecision(6))) };
+}
+export function spotFromFractions(s, w, h) {
+  if (s.L) return flatSpot(s.x * w, s.y * w, s.L.map(row => row.map(v => v * w)));
+  return { H: [s.H[0].map(v => v * w), s.H[1].map(v => v * h), s.H[2].slice()] };
 }
 
 // A first guess when the target can't be found: the face across the middle of the photo.
 export function defaultSpots(face, w, h) {
   const scale = face === 'triple40' ? Math.min((h * 0.8) / 68, (w * 0.8) / 24) : (w * 0.7) / 40;
-  return geometry(face).spots.map(p => ({ x: w / 2 + p.x * scale, y: h / 2 + p.y * scale, L: [[scale, 0], [0, scale]] }));
+  return geometry(face).spots.map(p => flatSpot(w / 2 + p.x * scale, h / 2 + p.y * scale, [[scale, 0], [0, scale]]));
 }
 
 // The four edge handles of a spot: where its edge ring (edgeCm) crosses the left-right and up-down
@@ -39,25 +92,40 @@ export function handlesFor(face, spots) {
   ]);
 }
 
-// Moves a handle to `pt`. The centre moves the whole spot. An edge handle moves just that side of the
-// ring: the opposite side stays where it is, and the spot's centre and width (or height) follow, so
-// the ring stretches like pulling one side of a band.
+// The perspective map taking four face points (cm) to four photo points, or null if there isn't one.
+function fromPoints(src, dst) {
+  const M = [], V = [];
+  src.forEach((p, i) => {
+    const q = dst[i];
+    M.push([p.x, p.y, 1, 0, 0, 0, -p.x * q.x, -p.y * q.x]);
+    V.push(q.x);
+    M.push([0, 0, 0, p.x, p.y, 1, -p.x * q.y, -p.y * q.y]);
+    V.push(q.y);
+  });
+  const h = solveLinear(M, V);
+  return h && { H: [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]] };
+}
+
+// Moves a handle to `pt`. The centre moves the whole spot. Each edge handle moves freely: the spot's
+// map is worked out from where the four edge handles are, so the others stay where they are, and the
+// centre and inner rings follow in perspective.
 export function moveHandle(face, spots, h, pt) {
   const s = spots[h.spot];
   if (h.kind === 'centre') {
-    s.x = pt.x;
-    s.y = pt.y;
+    const c = spotToPhoto(s, 0, 0);
+    s.H = shifted(s, pt.x - c.x, pt.y - c.y).H;
     return;
   }
   const R = edgeCm(face);
-  const [u, v] = SIDES[h.kind];
-  // The column of L for this handle's direction (0 across, 1 down), and which way along it the handle is.
-  const col = u ? 0 : 1, sign = u || v;
-  const opposite = spotToPhoto(s, -u * R, -v * R);
-  const half = { x: (pt.x - opposite.x) / 2, y: (pt.y - opposite.y) / 2 };
-  s.x = opposite.x + half.x;
-  s.y = opposite.y + half.y;
-  s.L = s.L.map((row, k) => row.map((val, j) => (j === col ? (sign * (k ? half.y : half.x)) / R : val)));
+  const sides = Object.entries(SIDES);
+  const next = fromPoints(
+    sides.map(([, [u, v]]) => ({ x: u * R, y: v * R })),
+    sides.map(([kind, [u, v]]) => (kind === h.kind ? pt : spotToPhoto(s, u * R, v * R))),
+  );
+  // A handle dragged across the others would turn the face inside out, so that move is ignored.
+  const inFront = next && [[0, 0], ...sides.map(([, [u, v]]) => [u * R, v * R])]
+    .every(([u, v]) => next.H[2][0] * u + next.H[2][1] * v + next.H[2][2] > 0);
+  if (inFront) s.H = next.H;
 }
 
 // Which spot a photo position belongs to, and where it is on that spot in centimetres.
@@ -176,8 +244,8 @@ function findEdges(p, cls, w, h, face) {
 
 // Fits rings of known sizes (each point's r, in cm) that share one centre and one shape:
 // (p − c)ᵀ·S·(p − c) = r². Written out that's a·x² + 2b·xy + d·y² + u·x + v·y + w = r², which is
-// linear in a, b, d, u, v and w, so it's solved by least squares. Returns the centre and L = S^(-1/2),
-// which turns cm from the centre into photo pixels, or null if the points don't make rings.
+// linear in a, b, d, u, v and w, so it's solved by least squares. Returns a spot seen straight on, with
+// L = S^(-1/2) turning cm from the centre into photo pixels, or null if the points don't make rings.
 function fitRings(pts) {
   if (pts.length < 12) return null;
   // Points are taken relative to their mean, which keeps the sums well behaved.
@@ -204,7 +272,7 @@ function fitRings(pts) {
   const ang = Math.abs(b) < 1e-12 ? (a >= d ? 0 : Math.PI / 2) : Math.atan2(l1 - a, b);
   const cs = Math.cos(ang), sn = Math.sin(ang), s1 = 1 / Math.sqrt(l1), s2 = 1 / Math.sqrt(l2);
   const L = [[cs * cs * s1 + sn * sn * s2, cs * sn * (s1 - s2)], [cs * sn * (s1 - s2), sn * sn * s1 + cs * cs * s2]];
-  return { x: c[0] + mx, y: c[1] + my, L };
+  return flatSpot(c[0] + mx, c[1] + my, L);
 }
 
 // How far a point is from a fit's ring for its edge, in cm.
@@ -223,24 +291,87 @@ function fitRobust(pts) {
   return fit && { ...fit, used: new Set(use) };
 }
 
+// Refines a fit to allow for perspective: finds the map that puts every edge point on its own ring
+// as nearly as possible (Levenberg–Marquardt, starting from `spot`). Null if it doesn't improve on it.
+function refinePerspective(spot, pts) {
+  if (pts.length < 20) return null;
+  // Points are taken from the spot's centre and scaled to about ±1, which keeps the numbers well behaved.
+  const c = spotToPhoto(spot, 0, 0), S = spotScale(spot) * 10;
+  const P = pts.map(q => ({ x: (q.x - c.x) / S, y: (q.y - c.y) / S, r: q.r }));
+  const N = [[S, 0, c.x], [0, S, c.y], [0, 0, 1]];
+  // The 8 numbers of the map from those scaled points back to the face, in cm.
+  const G0 = tidy(mul3(invert3(spot.H), N));
+  let g = [G0[0][0], G0[0][1], G0[0][2], G0[1][0], G0[1][1], G0[1][2], G0[2][0], G0[2][1]];
+  const off = (g, q) => {
+    const w = g[6] * q.x + g[7] * q.y + 1;
+    return Math.hypot((g[0] * q.x + g[1] * q.y + g[2]) / w, (g[3] * q.x + g[4] * q.y + g[5]) / w) - q.r;
+  };
+  const cost = g => P.reduce((t, q) => t + off(g, q) ** 2, 0);
+  const start = cost(g);
+  let best = start, lambda = 1e-3;
+  for (let it = 0; it < 25; it++) {
+    const res = P.map(q => off(g, q));
+    const J = P.map((q, k) => g.map((_, j) => {
+      const g2 = g.slice();
+      g2[j] += 1e-6;
+      return (off(g2, q) - res[k]) / 1e-6;
+    }));
+    const A = g.map((_, i) => g.map((_, j) => J.reduce((t, row) => t + row[i] * row[j], 0) * (i === j ? 1 + lambda : 1)));
+    const B = g.map((_, i) => -J.reduce((t, row, k) => t + row[i] * res[k], 0));
+    const step = solveLinear(A, B);
+    if (!step) break;
+    const g2 = g.map((v, i) => v + step[i]);
+    const c2 = cost(g2);
+    if (c2 < best) {
+      const small = best - c2 < best * 1e-6;
+      g = g2;
+      best = c2;
+      lambda /= 3;
+      if (small) break;
+    } else {
+      lambda *= 4;
+    }
+  }
+  if (!(best < start)) return null;
+  // Undo the scaling, then turn the map round to go from the face to the photo.
+  const G = [[g[0], g[1], g[2]], [g[3], g[4], g[5]], [g[6], g[7], 1]];
+  return { H: tidy(invert3(mul3(G, invert3(N)))) };
+}
+
 // The spot's middle and shape from its colour edges, falling back to the gold patch alone.
 // `note`, if given, records the edge points (marking those left out of the fit) and what was used.
 function spotShape(p, cls, w, h, face, note = null) {
   const edge = findEdges(p, cls, w, h, face);
-  const fit = fitRobust(edge);
+  const flat = fitRobust(edge);
   // Sanity check: the gold is 4cm in radius, so the fitted size should be close to its radius / 4.
-  const size = fit && Math.sqrt(Math.abs(fit.L[0][0] * fit.L[1][1] - fit.L[0][1] * fit.L[1][0]));
   const fromGold = (p.rx + p.ry) / 2 / 4;
-  const good = fit && size > 0.7 * fromGold && size < 1.4 * fromGold;
+  const good = flat && spotScale(flat) > 0.7 * fromGold && spotScale(flat) < 1.4 * fromGold;
+  let fit = good ? flat : null, used = flat?.used || new Set(), tilted = false;
+  if (fit) {
+    // Allow for perspective, then refit once more with the points that sit well on those rings.
+    let refined = refinePerspective(fit, [...used]);
+    if (refined) {
+      used = new Set(edge.filter(q => Math.abs(offRing(refined, q)) < 0.25));
+      refined = refinePerspective(refined, [...used]) || refined;
+      // Perspective only nudges the rings; a big change means the fit went wrong, so it's not used.
+      const a = spotToPhoto(fit, 0, 0), b = spotToPhoto(refined, 0, 0);
+      const ratio = spotScale(refined) / spotScale(fit);
+      if (Math.hypot(a.x - b.x, a.y - b.y) < spotScale(fit) && ratio > 0.85 && ratio < 1.18) {
+        fit = refined;
+        tilted = true;
+      } else {
+        used = flat.used;
+      }
+    }
+  }
   if (note) {
-    const counts = ringEdges(face).map(e => `${e.name} ${edge.filter(q => q.r === e.r && fit?.used.has(q)).length}`);
+    const counts = ringEdges(face).map(e => `${e.name} ${edge.filter(q => q.r === e.r && used.has(q)).length}`);
     Object.assign(note, {
-      edge: edge.map(q => ({ ...q, used: !!fit?.used.has(q) })),
-      from: good ? `rings (${counts.join(', ')})` : fit ? 'gold (ring fit out of range)' : 'gold (too few edge points)',
+      edge: edge.map(q => ({ ...q, used: used.has(q) })),
+      from: fit ? `rings${tilted ? ' in perspective' : ''} (${counts.join(', ')})` : flat ? 'gold (ring fit out of range)' : 'gold (too few edge points)',
     });
   }
-  if (good) return { cx: fit.x, cy: fit.y, L: fit.L };
-  return { cx: p.cx, cy: p.cy, L: [[p.rx / 4, 0], [0, p.ry / 4]] };
+  return fit ? { H: fit.H } : flatSpot(p.cx, p.cy, [[p.rx / 4, 0], [0, p.ry / 4]]);
 }
 
 // Connected patches of gold, with their size and bounding box.
@@ -357,9 +488,14 @@ export function findFace(canvas, face, debug = null) {
   const measured = picked.map((p, i) => (p.area ? spotShape(p, cls, w, h, face, notes[i]) : null));
   if (debug) notes.forEach(n => { n.edge = (n.edge || []).map(q => ({ ...q, x: q.x / k, y: q.y / k })); });
   return picked.map((p, i) => {
-    const m = measured[i] || measured[i === 0 ? 1 : i - 1] || measured.find(Boolean);
-    const cx = measured[i] ? m.cx : p.cx, cy = measured[i] ? m.cy : p.cy;
-    return { x: cx / k, y: cy / k, L: m.L.map(row => row.map(v => v / k)) };
+    let s = measured[i];
+    if (!s) {
+      // A guessed spot: the nearest measured one, moved to where this one should be.
+      const m = measured[i === 0 ? 1 : i - 1] || measured.find(Boolean);
+      const c = spotToPhoto(m, 0, 0);
+      s = shifted(m, p.cx - c.x, p.cy - c.y);
+    }
+    return scaled(s, 1 / k);
   });
 }
 

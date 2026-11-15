@@ -8,7 +8,7 @@ import {
   hasPos, snapToScore, markerPos,
 } from './face.js';
 import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
-import { findFace, defaultSpots, handlesFor, moveHandle, locate, edgeCm } from './photo.js';
+import { findFace, defaultSpots, handlesFor, moveHandle, locate, edgeCm, ringPath, spotToFractions } from './photo.js';
 import {
   CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, ESTIMATE_MIN_ARROWS, WA18_ARROWS, classify, estimate, hasClassTable,
 } from './classes.js';
@@ -762,10 +762,7 @@ function photoOverlayHTML(round) {
   const unit = Math.max(p.w, p.h) / 300;
   const lowest = lowestRing(round.face), edge = edgeCm(round.face);
   const radii = [...Array.from({ length: 11 - lowest }, (_, i) => ringOuter(lowest + i)), X_RADIUS];
-  const rings = p.spots.map(s => `
-    <g transform="matrix(${s.L[0][0]} ${s.L[1][0]} ${s.L[0][1]} ${s.L[1][1]} ${s.x} ${s.y})">
-      ${radii.map(r => `<circle r="${r}" class="${r === edge ? 'pr edge' : 'pr'}"/>`).join('')}
-    </g>`).join('');
+  const rings = p.spots.map(s => radii.map(r => `<path d="${ringPath(s, r)}" class="${r === edge ? 'pr edge' : 'pr'}"/>`).join('')).join('');
   const marks = p.arrows.map((a, k) => (a.miss ? '' : `
     <g class="pmk"><circle cx="${a.x}" cy="${a.y}" r="${unit * 1.6}"/>
       <text x="${a.x + unit * 2.4}" y="${a.y - unit * 1.8}" font-size="${unit * 4.5}">${k + 1}</text></g>`)).join('');
@@ -924,8 +921,8 @@ function finishPhoto(round) {
   });
   currentEnd(round).push(...arrows);
   if (save) {
-    // And where each spot was in the photo, in the same fractions.
-    const spots = p.spots.map(s => ({ x: r4(s.x / p.w), y: r4(s.y / p.h), L: s.L.map(row => row.map(v => r4(v / p.w))) }));
+    // And where each spot was in the photo, as its perspective map in the same fractions.
+    const spots = p.spots.map(s => spotToFractions(s, p.w, p.h));
     round.photos = { ...round.photos, [name]: { end: round.ends.length - 1, spots } };
     saveFile(p.file, name);
   }
