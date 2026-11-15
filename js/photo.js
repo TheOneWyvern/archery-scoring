@@ -150,10 +150,11 @@ function fitEllipse(pts) {
   if (!s) return null;
   const [A, B, C, D, E] = s;
   if (4 * A * C - B * B <= 0) return null;
-  // Centre where the gradient is zero, then the shape around it: S scaled so that pᵀ·S·p = 1.
+  // Centre where the gradient is zero. Around it the ellipse is pᵀ·S·p = 1 − (its left side at the
+  // centre), so S is scaled by that.
   const c = solveLinear([[2 * A, B], [B, 2 * C]], [-D, -E]);
   if (!c) return null;
-  const k = 1 + A * c[0] * c[0] + B * c[0] * c[1] + C * c[1] * c[1] + D * c[0] + E * c[1];
+  const k = 1 - (A * c[0] * c[0] + B * c[0] * c[1] + C * c[1] * c[1] + D * c[0] + E * c[1]);
   if (k <= 0) return null;
   const a = A / k, b = B / 2 / k, d = C / k;
   // L = S^(-1/2), from the eigenvalues and eigenvectors of the 2×2 symmetric matrix S.
