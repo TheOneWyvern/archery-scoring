@@ -1,6 +1,6 @@
 // Archery GB indoor classifications, from Archery GB's indoor classification tables (Table 28).
 
-import { roundStats } from './rules.js';
+import { roundStats, isPractice } from './rules.js';
 
 // Lowest class first. Archer and Bowman classes are claimed from rounds totalling a set number of
 // arrows at that level; Master Bowman classes also need record status competitions.
@@ -122,19 +122,42 @@ const tableFor = round => WA18[SAME_AS[round.bow] || round.bow];
 
 export const hasClassTable = (round) => round.type === 'wa18' && !!tableFor(round);
 
-// The class a complete WA 18m round reaches, and how many more points the next class needs.
-// Null when the round doesn't qualify or the archer's age group and category aren't known.
-export function classify(round, profile) {
-  if (!hasClassTable(round) || !profile?.age || !profile?.gender) return null;
-  const mins = tableFor(round)[profile.gender]?.[profile.age];
-  const st = roundStats(round);
-  if (!mins || !st.complete) return null;
+// The minimum scores for this bow and archer, or null if there's no table or the group isn't known.
+function minimums(round, profile) {
+  if (!profile?.age || !profile?.gender) return null;
+  return tableFor(round)?.[profile.gender]?.[profile.age] || null;
+}
+
+// Where a WA 18m total sits: the class it reaches and how many more points the next class needs.
+function place(mins, total) {
   let i = -1;
-  while (i + 1 < mins.length && st.total >= mins[i + 1]) i++;
+  while (i + 1 < mins.length && total >= mins[i + 1]) i++;
   return {
     index: i,
     reached: CLASSES[i] || null,
     next: CLASSES[i + 1] || null,
-    short: i + 1 < mins.length ? mins[i + 1] - st.total : 0,
+    short: i + 1 < mins.length ? mins[i + 1] - total : 0,
   };
+}
+
+// The class a complete WA 18m round reaches, and how many more points the next class needs.
+// Null when the round doesn't qualify or the archer's age group and category aren't known.
+export function classify(round, profile) {
+  const mins = hasClassTable(round) && minimums(round, profile);
+  const st = roundStats(round);
+  return mins && st.complete ? place(mins, st.total) : null;
+}
+
+// Practice shorter than this is too little to estimate from.
+export const ESTIMATE_MIN_ARROWS = 12;
+export const WA18_ARROWS = 60;
+
+// A rough guide for practice only: the practice average scaled up to a full WA 18m round of
+// 60 arrows, and the class that total would reach. Never a real classification.
+export function estimate(round, profile) {
+  const mins = isPractice(round) && minimums(round, profile);
+  const st = roundStats(round);
+  if (!mins || st.arrows < ESTIMATE_MIN_ARROWS) return null;
+  const total = Math.round(st.avg * WA18_ARROWS);
+  return { ...place(mins, total), total };
 }

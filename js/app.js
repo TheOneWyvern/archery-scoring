@@ -8,7 +8,9 @@ import {
   hasPos, snapToScore, markerPos,
 } from './face.js';
 import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
-import { CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, classify, hasClassTable } from './classes.js';
+import {
+  CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, ESTIMATE_MIN_ARROWS, WA18_ARROWS, classify, estimate, hasClassTable,
+} from './classes.js';
 
 // How far above the finger the arrow marker sits while placing it on the target.
 const TOUCH_OFFSET_PX = 56;
@@ -847,6 +849,7 @@ function saveDetails(round) {
 
 // The Archery GB class a complete WA 18m round reaches, and how close it came to the next one.
 function classCardHTML(round) {
+  if (isPractice(round)) return estimateCardHTML(round);
   if (round.type !== 'wa18' || !roundStats(round).complete) return '';
   const card = body => `<div class="card class-card"><div class="card-label">Classification</div>${body}</div>`;
   if (!hasClassTable(round)) return card(`<p class="muted">Archery GB has no indoor classification table for ${esc(BOWS[round.bow].toLowerCase())}s.</p>`);
@@ -855,6 +858,25 @@ function classCardHTML(round) {
   return card(`
     <div class="class-reached">${c.reached ? `<b>${esc(c.reached.name)}</b> <span class="class-code">${c.reached.code}</span>` : '<b>Not at a class yet</b>'}</div>
     <p class="muted">${c.next ? `${c.short} more point${c.short === 1 ? '' : 's'} for ${esc(c.next.name)} (${c.next.code})` : 'The highest indoor class.'}</p>`);
+}
+
+// For practice: the class the practice average would reach over a full WA 18m round. Marked clearly
+// as an estimate, since a real classification needs all 60 arrows shot as one WA 18m round.
+function estimateCardHTML(round) {
+  const st = roundStats(round);
+  if (!st.arrows) return '';
+  const card = body => `<div class="card class-card estimate"><div class="card-label">Practice estimate</div>${body}
+    <p class="estimate-note">Not a classification. It only counts from a complete WA 18m round of ${WA18_ARROWS} arrows.</p></div>`;
+  if (st.arrows < ESTIMATE_MIN_ARROWS) {
+    return card(`<p class="muted">Shoot at least ${ESTIMATE_MIN_ARROWS} arrows to see which class this practice would reach over a full WA 18m round.</p>`);
+  }
+  const e = estimate(round, profileOf(round));
+  if (!e) return card(`<p class="muted">Set ${esc(possessive(round))} age group and category in <a href="#/settings">Settings</a> to see which class this practice would reach.</p>`);
+  const per = (e.short / WA18_ARROWS).toFixed(2);
+  return card(`
+    <div class="class-reached">${e.reached ? `<b>About ${esc(e.reached.name)}</b> <span class="class-code">${e.reached.code}</span>` : '<b>Below the first class</b>'}</div>
+    <p class="muted">${st.arrows} arrows averaging ${st.avg.toFixed(2)} would be about ${e.total} over a full WA 18m round.
+      ${e.next ? `About ${e.short} more point${e.short === 1 ? '' : 's'} (${per} per arrow) for ${esc(e.next.name)} (${e.next.code}).` : ''}</p>`);
 }
 
 // Progress towards claiming each class, from every complete round in this archer's bow and face.
