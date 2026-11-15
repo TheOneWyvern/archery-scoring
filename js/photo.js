@@ -83,9 +83,8 @@ export function defaultSpots(face, w, h) {
 const SIDES = { right: [1, 0], left: [-1, 0], bottom: [0, 1], top: [0, -1] };
 
 // The handles for lining up the spots: each spot's centre, and its edge ring at the right, left, top
-// and bottom.
-export function handlesFor(face, spots) {
-  const R = edgeCm(face);
+// and bottom. R picks a different ring for the edge handles (dev/ring-checker.html marks each one).
+export function handlesFor(face, spots, R = edgeCm(face)) {
   return spots.flatMap((s, i) => [
     { spot: i, kind: 'centre', ...spotToPhoto(s, 0, 0) },
     ...Object.entries(SIDES).map(([kind, [u, v]]) => ({ spot: i, kind, ...spotToPhoto(s, u * R, v * R) })),
@@ -109,14 +108,13 @@ function fromPoints(src, dst) {
 // Moves a handle to `pt`. The centre moves the whole spot. Each edge handle moves freely: the spot's
 // map is worked out from where the four edge handles are, so the others stay where they are, and the
 // centre and inner rings follow in perspective.
-export function moveHandle(face, spots, h, pt) {
+export function moveHandle(face, spots, h, pt, R = edgeCm(face)) {
   const s = spots[h.spot];
   if (h.kind === 'centre') {
     const c = spotToPhoto(s, 0, 0);
     s.H = shifted(s, pt.x - c.x, pt.y - c.y).H;
     return;
   }
-  const R = edgeCm(face);
   const sides = Object.entries(SIDES);
   const next = fromPoints(
     sides.map(([, [u, v]]) => ({ x: u * R, y: v * R })),
