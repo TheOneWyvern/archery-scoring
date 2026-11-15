@@ -1,6 +1,6 @@
 import {
   ROUNDS, BOWS, FACES, hasX, allowedLabels, sortArrows, labelClass, rulesHint, ringOuter, lowestRing,
-  roundStats, compareScores, configKey, describeConfig, archerOf, roundSpec, isPractice,
+  roundStats, compareScores, configKey, describeConfig, archerOf, roundSpec, isPractice, X_RADIUS,
 } from './rules.js';
 import * as store from './store.js';
 import {
@@ -8,6 +8,7 @@ import {
   hasPos, snapToScore, markerPos,
 } from './face.js';
 import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
+import { findFace, defaultSpots, handlesFor, moveHandle, locate, edgeCm } from './photo.js';
 import {
   CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, ESTIMATE_MIN_ARROWS, WA18_ARROWS, classify, estimate, hasClassTable,
 } from './classes.js';
@@ -169,6 +170,7 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>',
   target: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></svg>',
   card: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>',
+  camera: '<svg viewBox="0 0 24 24"><path d="M3 8h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13.5" r="3.5" /></svg>',
 };
 
 // ---------- routing ----------
@@ -182,7 +184,10 @@ function parseRoute() {
 
 function render() {
   current = parseRoute();
-  const screens = { '': renderHome, new: renderNew, score: renderScore, round: renderRound, history: renderHistory, stats: renderStats, settings: renderSettings };
+  const screens = {
+    '': renderHome, new: renderNew, score: renderScore, photo: renderPhoto, round: renderRound,
+    history: renderHistory, stats: renderStats, settings: renderSettings,
+  };
   (screens[current.name] || renderHome)();
   renderModal();
 }
@@ -192,6 +197,11 @@ window.addEventListener('hashchange', () => {
   ui.restoring = false;
   ui.sheet = null;
   ui.plot = null;
+  // A photo is only kept while scoring from it.
+  if (ui.photo && parseRoute().name !== 'photo') {
+    URL.revokeObjectURL(ui.photo.url);
+    ui.photo = null;
+  }
   // Start each visit to the new round screen from the remembered archers.
   if (parseRoute().name !== 'new') ui.newArchers = null;
   render();
@@ -554,10 +564,14 @@ function renderScore() {
       </div>
       <div class="end-row ${per ? '' : 'open'}"><div class="slots">${slots}</div><div class="end-total"><small>End</small>${endTotal}</div></div>
       ${prevHtml}
-      ${settings.showTarget ? `<div class="mode-tabs">
-        <button type="button" data-action="mode" data-m="keypad" class="${mode === 'keypad' ? 'on' : ''}">Keypad</button>
-        <button type="button" data-action="mode" data-m="target" class="${mode === 'target' ? 'on' : ''}">Target</button>
-      </div>` : ''}
+      <div class="entry-bar">
+        ${settings.showTarget ? `<div class="mode-tabs">
+          <button type="button" data-action="mode" data-m="keypad" class="${mode === 'keypad' ? 'on' : ''}">Keypad</button>
+          <button type="button" data-action="mode" data-m="target" class="${mode === 'target' ? 'on' : ''}">Target</button>
+        </div>` : ''}
+        ${full ? '' : `<label class="btn photo-btn">${ICONS.camera}<span>Photo</span>
+          <input type="file" accept="image/*" data-change="photo" hidden></label>`}
+      </div>
       <div class="entry mode-${mode}">${entry}</div>
       <div class="score-actions">
         <button type="button" class="btn" data-action="undo" ${st.arrows ? '' : 'disabled'}>Undo</button>
@@ -679,6 +693,230 @@ function finishRound(round) {
     ui.justFinished.add(r.id);
   }
   location.replace(`#/round/${group[0].id}`);
+}
+
+// ---------- scoring from a photo ----------
+
+// Photos are scaled down to this many pixels along their longer side: plenty for tapping arrows.
+const PHOTO_MAX_PX = 1600;
+// The magnifier shows this many screen pixels either side of the point, enlarged this many times.
+const LOUPE_PX = 64, LOUPE_ZOOM = 3;
+
+// Arrows still to enter in this end, or Infinity when the end has no set number.
+function photoRoom(round) {
+  const per = roundSpec(round).arrowsPerEnd;
+  return per ? per - currentEnd(round).length : Infinity;
+}
+
+async function startPhoto(round, file) {
+  if (!round || !file) return;
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, PHOTO_MAX_PX / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+    const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    const found = findFace(canvas, round.face);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
+    const spots = found || defaultSpots(round.face, w, h);
+    ui.photo = {
+      roundId: round.id, file, url: URL.createObjectURL(blob), w, h, found: !!found, step: 'align',
+      spots, initial: structuredClone(spots),
+      // Each tapped arrow is { x, y } in the photo, or { miss: true } for one that isn't in it.
+      arrows: [],
+    };
+    go(`#/photo/${round.id}`);
+  } catch (e) {
+    console.error(e);
+    toast('Could not open that photo');
+  }
+}
+
+// The arrow tapped at photo position pt: its score, and where it is on its spot.
+function photoArrow(round, pt) {
+  const at = locate(ui.photo.spots, pt);
+  return { ...hitTest(round.face, round.bow, at.x, at.y, store.getSettings().arrowDiameterMm, true), s: at.s };
+}
+
+// The rings drawn over the photo through each spot's own fit, the tapped arrows, and while lining
+// up, the handles.
+function photoOverlayHTML(round) {
+  const p = ui.photo;
+  const unit = Math.max(p.w, p.h) / 300;
+  const lowest = lowestRing(round.face), edge = edgeCm(round.face);
+  const radii = [...Array.from({ length: 11 - lowest }, (_, i) => ringOuter(lowest + i)), X_RADIUS];
+  const rings = p.spots.map(s => `
+    <g transform="matrix(${s.L[0][0]} ${s.L[1][0]} ${s.L[0][1]} ${s.L[1][1]} ${s.x} ${s.y})">
+      ${radii.map(r => `<circle r="${r}" class="${r === edge ? 'pr edge' : 'pr'}"/>`).join('')}
+    </g>`).join('');
+  const marks = p.arrows.map((a, k) => (a.miss ? '' : `
+    <g class="pmk"><circle cx="${a.x}" cy="${a.y}" r="${unit * 1.6}"/>
+      <text x="${a.x + unit * 2.4}" y="${a.y - unit * 1.8}" font-size="${unit * 4.5}">${k + 1}</text></g>`)).join('');
+  const handles = p.step === 'align'
+    ? handlesFor(round.face, p.spots).map(h => `<circle class="handle ${h.kind}" cx="${h.x}" cy="${h.y}" r="${unit * 4}"/>`).join('')
+    : '';
+  return rings + marks + handles;
+}
+
+function renderPhoto() {
+  const round = store.getRound(current.id);
+  const p = ui.photo;
+  if (!round || !p || p.roundId !== round.id) return location.replace(round ? `#/score/${round.id}` : '#/');
+  const align = p.step === 'align';
+  const room = photoRoom(round);
+  const limited = Number.isFinite(room);
+  const done = limited ? p.arrows.length === room : p.arrows.length > 0;
+  const chips = p.arrows.map((a, k) => {
+    const v = a.miss ? 'M' : photoArrow(round, a).v;
+    return `<button type="button" class="slot filled ${labelClass(v)}" data-action="photo-remove" data-k="${k}" aria-label="Remove arrow ${k + 1}">${esc(v)}</button>`;
+  }).join('');
+  const empty = limited ? Array.from({ length: room - p.arrows.length }, (_, i) => `<div class="slot ${i ? '' : 'next'}"></div>`).join('') : '';
+  const help = align
+    ? (p.found
+      ? '<b>Check the rings.</b> They should sit on the target\'s rings. If not, drag the handles.'
+      : '<b>Line up the rings.</b> The target wasn\'t found, so drag each middle handle onto a centre and the edge handles onto the outside of the blue.')
+    : '<b>Touch where each arrow goes into the face.</b> Slide to fine-tune with the magnifier, then let go. Tap a score below to remove it.';
+
+  app.innerHTML = shell({
+    title: `${showNames() ? `${nameOf(round)} · ` : 'Photo · '}End ${round.ends.length}`,
+    back: true,
+    nav: false,
+    cls: 'photo-screen',
+    body: `
+      <div class="photo-help" id="photo-help">${help}</div>
+      <div class="photo-wrap" id="photo-wrap">
+        <svg id="photo-svg" viewBox="0 0 ${p.w} ${p.h}" xmlns="http://www.w3.org/2000/svg">
+          <g id="photo-g">
+            <image href="${p.url}" width="${p.w}" height="${p.h}"/>
+            <g id="photo-overlay">${photoOverlayHTML(round)}</g>
+            <circle id="photo-ghost" r="${Math.max(p.w, p.h) / 190}" style="display:none"/>
+          </g>
+        </svg>
+        <div class="loupe" id="loupe" hidden><svg id="loupe-svg" xmlns="http://www.w3.org/2000/svg"><use href="#photo-g"/></svg></div>
+        <div class="photo-preview" id="photo-preview" hidden></div>
+      </div>
+      ${align ? `
+        <div class="score-actions">
+          <button type="button" class="btn" data-action="photo-reset">Reset rings</button>
+          <button type="button" class="btn primary" data-action="photo-next">Rings match →</button>
+        </div>` : `
+        <div class="end-row ${limited ? '' : 'open'}"><div class="slots">${chips}${empty}</div></div>
+        <div class="score-actions">
+          <button type="button" class="btn" data-action="photo-align">Rings</button>
+          <button type="button" class="btn z-miss" data-action="photo-miss" ${p.arrows.length < room ? '' : 'disabled'}>Not in photo</button>
+          <button type="button" class="btn primary" data-action="photo-done" ${done ? '' : 'disabled'}>${limited ? `Done ${p.arrows.length}/${room}` : 'Done'}</button>
+        </div>
+        <label class="toggle photo-save">
+          <span><span class="field-label">Save photo for training</span>
+            <small class="muted">Saves it to Downloads, and keeps where you tapped with this round.</small></span>
+          <input type="checkbox" role="switch" data-setting="savePhotos" ${store.getSettings().savePhotos ? 'checked' : ''}>
+        </label>`}`,
+  });
+  bindPhoto(round);
+}
+
+// Lining up: drag a handle. Tapping arrows: touch and drag to place one (it sits above the finger,
+// as on the target), with a magnifier showing the spot being placed.
+function bindPhoto(round) {
+  const p = ui.photo;
+  const svg = $('#photo-svg'), loupe = $('#loupe'), lsvg = $('#loupe-svg'), ghost = $('#photo-ghost'), wrap = $('#photo-wrap');
+  if (!svg) return;
+  const align = p.step === 'align';
+  let drag = null;
+  const scale = () => svg.getScreenCTM().a;
+
+  const showLoupe = (pt, e) => {
+    const r = LOUPE_PX / LOUPE_ZOOM / scale();
+    lsvg.setAttribute('viewBox', `${pt.x - r} ${pt.y - r} ${2 * r} ${2 * r}`);
+    // The magnifier sits on the side away from the finger.
+    const box = wrap.getBoundingClientRect();
+    loupe.classList.toggle('right', e.clientX < box.left + box.width / 2);
+    loupe.hidden = false;
+  };
+
+  svg.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    svg.setPointerCapture(e.pointerId);
+    const finger = toFace(svg, e.clientX, e.clientY), aim = aimAt(svg, e);
+    const reach = GRAB_PX / scale();
+    const start = { x: e.clientX, y: e.clientY };
+    if (align) {
+      // The handle under the finger, if any. It keeps its place relative to the finger, so it doesn't jump.
+      let best = null;
+      for (const h of handlesFor(round.face, p.spots)) {
+        const d = Math.hypot(h.x - finger.x, h.y - finger.y);
+        if (d <= reach && (!best || d < best.d)) best = { d, handle: h, dx: h.x - aim.x, dy: h.y - aim.y };
+      }
+      if (best) drag = { ...start, ...best };
+      return;
+    }
+    // Placed arrows aren't grabbed, as arrows in a tight group would keep catching a new one.
+    if (p.arrows.length < photoRoom(round)) {
+      drag = { ...start, dx: 0, dy: 0, k: -1 };
+      move(e);
+    } else {
+      toast('All the arrows are in. Tap a score below to remove one.');
+    }
+  });
+
+  const move = e => {
+    if (!drag) return;
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) >= DRAG_PX) drag.moved = true;
+    const aim = aimAt(svg, e);
+    const pt = { x: aim.x + drag.dx, y: aim.y + drag.dy };
+    if (drag.k === -1) {
+      drag.pt = pt;
+      ghost.setAttribute('cx', pt.x);
+      ghost.setAttribute('cy', pt.y);
+      ghost.style.display = '';
+      // Shown over the photo, as changing the text above it would move the photo under the finger.
+      const preview = $('#photo-preview');
+      preview.innerHTML = `Arrow ${p.arrows.length + 1}: ${chip(photoArrow(round, pt).v)} <small>let go to place</small>`;
+      preview.hidden = false;
+    } else {
+      if (!drag.moved) return;
+      moveHandle(round.face, p.spots, drag.handle, pt);
+      $('#photo-overlay').innerHTML = photoOverlayHTML(round);
+    }
+    showLoupe(pt, e);
+  };
+  svg.addEventListener('pointermove', move);
+
+  svg.addEventListener('pointerup', () => {
+    const d = drag;
+    drag = null;
+    loupe.hidden = true;
+    if (!d) return;
+    if (d.k === -1 && d.pt) { p.arrows.push(d.pt); buzz(); }
+    render();
+  });
+  svg.addEventListener('pointercancel', () => { drag = null; render(); });
+}
+
+function finishPhoto(round) {
+  const p = ui.photo;
+  const save = store.getSettings().savePhotos;
+  const ext = (p.file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+  const name = `archery-${round.date}-${uid()}.${ext}`;
+  // With the photo saved, each arrow also keeps where it was tapped, as a fraction of the photo's
+  // width and height, so the photos and the taps can be used together later.
+  const r4 = v => Math.round(v * 10000) / 10000;
+  const arrows = p.arrows.map(a => {
+    const arrow = a.miss ? { v: 'M' } : photoArrow(round, a);
+    return save ? { ...arrow, photo: name, ...(a.miss ? {} : { px: r4(a.x / p.w), py: r4(a.y / p.h) }) } : arrow;
+  });
+  currentEnd(round).push(...arrows);
+  if (save) {
+    // And where each spot was in the photo, in the same fractions.
+    const spots = p.spots.map(s => ({ x: r4(s.x / p.w), y: r4(s.y / p.h), L: s.L.map(row => row.map(v => r4(v / p.w))) }));
+    round.photos = { ...round.photos, [name]: { end: round.ends.length - 1, spots } };
+    saveFile(p.file, name);
+  }
+  store.updateRound(round);
+  buzz();
+  location.replace(`#/score/${round.id}`);
+  if (save) toast('Photo saved to Downloads');
 }
 
 // ---------- scorecard ----------
@@ -1520,6 +1758,12 @@ document.addEventListener('click', e => {
     case 'share': ui.sheet = 'share'; renderModal(); break;
     case 'details-open': ui.sheet = 'details'; renderModal(); break;
     case 'details-save': saveDetails(round); break;
+    case 'photo-next': ui.photo.step = 'arrows'; render(); break;
+    case 'photo-align': ui.photo.step = 'align'; render(); break;
+    case 'photo-reset': ui.photo.spots = structuredClone(ui.photo.initial); render(); break;
+    case 'photo-miss': ui.photo.arrows.push({ miss: true }); render(); break;
+    case 'photo-remove': ui.photo.arrows.splice(Number(el.dataset.k), 1); render(); break;
+    case 'photo-done': finishPhoto(round); break;
     case 'share-text': closeModal(); share(round); break;
     case 'share-image': closeModal(); attempt(() => shareScorecardImage(round)); break;
     case 'share-pdf': printScorecard(round); break;
@@ -1591,6 +1835,7 @@ document.addEventListener('change', async e => {
     return;
   }
   switch (el.dataset.change) {
+    case 'photo': startPhoto(store.getRound(current.id), el.files[0]); el.value = ''; break;
     case 'history-filter': ui.historyFilter = el.value; render(); break;
     case 'stats-archer': ui.statsArcher = el.value; ui.statsConfig = null; render(); break;
     case 'stats-config': ui.statsConfig = el.value; render(); break;

@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS = {
   defaultType: 'last',
   // Pinch zoom is off unless turned on, so the app feels like an app rather than a web page.
   allowZoom: false,
+  // Save each target photo to the phone, with where its arrows were tapped, for training later.
+  savePhotos: false,
   myName: '',
   // Your age group and men's or women's category, for classifications ('' until set).
   myAge: '',
