@@ -167,14 +167,16 @@ function fitEllipse(pts) {
 }
 
 // The spot's middle and shape from the red and blue edge, falling back to the gold patch alone.
-function spotShape(p, cls, w, h) {
-  const fit = fitEllipse(redBlueEdge(p, cls, w, h));
+// `note`, if given, records the edge points and which was used.
+function spotShape(p, cls, w, h, note = null) {
+  const edge = redBlueEdge(p, cls, w, h);
+  const fit = fitEllipse(edge);
   // Sanity check: the edge should be about twice the gold's radius out.
   const r = fit && Math.sqrt(Math.abs(fit.L[0][0] * fit.L[1][1] - fit.L[0][1] * fit.L[1][0]));
-  if (fit && r > 1.5 * Math.min(p.rx, p.ry) && r < 2.8 * Math.max(p.rx, p.ry)) {
-    // L maps a radius of 1 to the 8cm edge, so per centimetre it's L / 8.
-    return { cx: fit.cx, cy: fit.cy, L: fit.L.map(row => row.map(v => v / 8)) };
-  }
+  const good = fit && r > 1.5 * Math.min(p.rx, p.ry) && r < 2.8 * Math.max(p.rx, p.ry);
+  if (note) Object.assign(note, { edge, from: good ? 'red/blue edge' : fit ? 'gold (edge fit out of range)' : 'gold (too few edge points)' });
+  // L maps a radius of 1 to the 8cm edge, so per centimetre it's L / 8.
+  if (good) return { cx: fit.cx, cy: fit.cy, L: fit.L.map(row => row.map(v => v / 8)) };
   return { cx: p.cx, cy: p.cy, L: [[p.rx / 4, 0], [0, p.ry / 4]] };
 }
 
@@ -206,12 +208,13 @@ function goldPatches(cls, w, h) {
 }
 
 // A gold spot is round, and ringed by red half again as far out (gold reaches 4cm, red 6 to 8cm).
-// That tells it apart from yellow sticky notes and fletchings.
-function isGoldSpot(p, cls, w, h) {
-  if (p.area < 120) return false;
+// That tells it apart from yellow sticky notes and fletchings. Returns why a patch isn't one, or ''.
+function notGoldSpot(p, cls, w, h) {
+  if (p.area < 120) return 'too small';
   const fill = p.area / (Math.PI * p.rx * p.ry);
   const aspect = p.rx / p.ry;
-  if (fill < 0.68 || fill > 1.12 || aspect < 0.6 || aspect > 1.65) return false;
+  if (fill < 0.68 || fill > 1.12) return `not round (fills ${Math.round(fill * 100)}%)`;
+  if (aspect < 0.6 || aspect > 1.65) return `too stretched (${aspect.toFixed(2)})`;
   let red = 0;
   const N = 36;
   for (let k = 0; k < N; k++) {
@@ -219,7 +222,7 @@ function isGoldSpot(p, cls, w, h) {
     const x = Math.round(p.cx + 1.5 * p.rx * Math.cos(t)), y = Math.round(p.cy + 1.5 * p.ry * Math.sin(t));
     if (x >= 0 && y >= 0 && x < w && y < h && cls[y * w + x] === RED) red++;
   }
-  return red / N >= 0.45;
+  return red / N >= 0.45 ? '' : `not ringed by red (${Math.round((red / N) * 100)}%)`;
 }
 
 // Picks this archer's spots from the gold spots found, top to bottom: the largest near the middle of
@@ -264,21 +267,38 @@ function pickSpots(found, face, w, h) {
 
 // Looks for the target in the photo drawn on `canvas`. Returns the spots (see the top of this file)
 // in the canvas's pixels, top to bottom, or null if no target was found.
-export function findFace(canvas, face) {
+// `debug`, if given, is filled in with the working, for checking the finder (dev/ring-checker.html):
+// the colour of each pixel at the size it was searched at, each gold patch and why it was or wasn't
+// taken as a spot, and each spot's edge points and what it was measured from.
+export function findFace(canvas, face, debug = null) {
   const k = Math.min(1, DETECT_PX / Math.max(canvas.width, canvas.height));
   const w = Math.round(canvas.width * k), h = Math.round(canvas.height * k);
   const small = Object.assign(document.createElement('canvas'), { width: w, height: h });
   const ctx = small.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(canvas, 0, 0, w, h);
   const cls = classify(ctx.getImageData(0, 0, w, h).data);
-  const picked = pickSpots(goldPatches(cls, w, h).filter(p => isGoldSpot(p, cls, w, h)), face, w, h);
+  const patches = goldPatches(cls, w, h).map(p => ({ ...p, rejected: notGoldSpot(p, cls, w, h) }));
+  const picked = pickSpots(patches.filter(p => !p.rejected), face, w, h);
+  const notes = (picked || []).map(p => ({ guessed: !p.area }));
+  if (debug) {
+    // Positions in the working are given in the canvas's pixels, like the spots.
+    Object.assign(debug, {
+      scale: k, w, h, cls, notes,
+      patches: patches.filter(p => p.area >= 20)
+        .map(p => ({ x: p.cx / k, y: p.cy / k, rx: p.rx / k, ry: p.ry / k, area: p.area, rejected: p.rejected })),
+    });
+  }
   if (!picked) return null;
   // Each found spot's centre and shape is measured. Guessed spots take the shape of the nearest
   // measured one.
-  const measured = picked.map(p => (p.area ? spotShape(p, cls, w, h) : null));
+  const measured = picked.map((p, i) => (p.area ? spotShape(p, cls, w, h, notes[i]) : null));
+  if (debug) notes.forEach(n => { n.edge = (n.edge || []).map(q => ({ x: q.x / k, y: q.y / k })); });
   return picked.map((p, i) => {
     const m = measured[i] || measured[i === 0 ? 1 : i - 1] || measured.find(Boolean);
     const cx = measured[i] ? m.cx : p.cx, cy = measured[i] ? m.cy : p.cy;
     return { x: cx / k, y: cy / k, L: m.L.map(row => row.map(v => v / k)) };
   });
 }
+
+// The colour classes in a debug report's `cls`.
+export const COLOURS = { GOLD, RED, BLUE };

@@ -6,3 +6,6 @@ indoor-classification-tables-*.pdf
 
 # Target photos kept for working on photo input, not published
 example photos/
+
+# Developer tools for checking the app, kept on this computer
+dev/
