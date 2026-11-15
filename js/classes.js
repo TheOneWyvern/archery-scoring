@@ -116,13 +116,17 @@ const WA18 = {
   },
 };
 
-export const hasClassTable = (round) => round.type === 'wa18' && !!WA18[round.bow];
+// Bows without tables of their own use another bow's, for now.
+const SAME_AS = { flatbow: 'barebow', traditional: 'barebow', horsebow: 'barebow' };
+const tableFor = round => WA18[SAME_AS[round.bow] || round.bow];
+
+export const hasClassTable = (round) => round.type === 'wa18' && !!tableFor(round);
 
 // The class a complete WA 18m round reaches, and how many more points the next class needs.
 // Null when the round doesn't qualify or the archer's age group and category aren't known.
 export function classify(round, profile) {
   if (!hasClassTable(round) || !profile?.age || !profile?.gender) return null;
-  const mins = WA18[round.bow][profile.gender]?.[profile.age];
+  const mins = tableFor(round)[profile.gender]?.[profile.age];
   const st = roundStats(round);
   if (!mins || !st.complete) return null;
   let i = -1;

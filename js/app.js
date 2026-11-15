@@ -295,7 +295,8 @@ function renderHome() {
 
 // ---------- new round ----------
 
-// Each archer row is { who: 'me' | person id | 'new', newName, bow, face }.
+// Each archer row is { who: 'me' | person id | 'new', newName, bow, face }, plus age and gender
+// once they're changed here (until then the archer's saved ones are shown).
 function defaultArchers() {
   const s = store.getSettings();
   const people = new Set(store.getPeople().map(p => p.id));
@@ -315,6 +316,8 @@ function archerRowsHTML() {
   return rows.map((a, i) => {
     const taken = new Set(rows.filter((_, j) => j !== i).map(x => x.who));
     const choice = (id, label) => `<option value="${id}" ${a.who === id ? 'selected' : ''} ${taken.has(id) ? 'disabled' : ''}>${esc(label)}</option>`;
+    const saved = a.who === 'new' ? { age: '', gender: '' } : store.archerProfile(a.who);
+    const prof = { age: a.age ?? saved.age, gender: a.gender ?? saved.gender };
     return `
       <div class="archer-row" data-row="${i}">
         <div class="archer-top">
@@ -331,6 +334,7 @@ function archerRowsHTML() {
           <select data-arch="bow" aria-label="Bow">${opt(BOWS, a.bow)}</select>
           <select data-arch="face" aria-label="Target face">${opt(FACES, a.face)}</select>
         </div>
+        ${profileSelectsHTML(prof, f => `data-arch="${f}"`)}
       </div>`;
   }).join('');
 }
@@ -384,9 +388,13 @@ function renderNew() {
     const el = e.target;
     const row = el.closest('[data-row]');
     if (!row || !el.dataset.arch) return;
-    ui.newArchers[Number(row.dataset.row)][el.dataset.arch] = el.value;
+    const a = ui.newArchers[Number(row.dataset.row)];
+    a[el.dataset.arch] = el.value;
     // Picking "New person" adds a name box, and other rows' choices change, so redraw the rows.
     if (el.dataset.arch === 'who' && e.type === 'change') {
+      // Show the newly picked archer's own age group and category.
+      delete a.age;
+      delete a.gender;
       archers.innerHTML = archerRowsHTML();
       if (el.value === 'new') archers.querySelector(`[data-row="${row.dataset.row}"] [data-arch="newName"]`)?.focus();
     }
@@ -432,6 +440,13 @@ function renderNew() {
       groupId,
     };
     const chosen = rows.map(a => ({ ...a, who: a.who === 'new' ? store.addPerson(a.newName.trim()).id : a.who }));
+    // Age groups and categories changed here are saved to each archer.
+    for (const a of chosen) {
+      const patch = { ...(a.age !== undefined ? { age: a.age } : {}), ...(a.gender !== undefined ? { gender: a.gender } : {}) };
+      if (!Object.keys(patch).length) continue;
+      if (a.who === store.ME) store.updateSettings({ ...('age' in patch ? { myAge: patch.age } : {}), ...('gender' in patch ? { myGender: patch.gender } : {}) });
+      else store.updatePerson(a.who, patch);
+    }
     // Each round keeps the archer's age group and category, so growing up a group doesn't change old classifications.
     const snapshot = who => { const p = store.archerProfile(who); return p.age && p.gender ? p : {}; };
     const rounds = chosen.map((a, seat) => ({ ...base, id: uid() + seat, archerId: a.who, seat, bow: a.bow, face: a.face, ...snapshot(a.who), ends: [[]] }));
