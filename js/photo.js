@@ -84,8 +84,9 @@ function classify(data) {
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
     if (max < 90) { out[i] = DARK; continue; }
     if (max - min < 0.4 * max) {
-      if (max < 115) out[i] = DARK;
-      else if (min > 150 && max - min < 0.2 * max) out[i] = WHITE;
+      // The black ring often looks mid grey with shine on it, and the paper is always far brighter.
+      if (max < 160) out[i] = DARK;
+      else if (min > 165 && max - min < 0.2 * max) out[i] = WHITE;
       continue;
     }
     const d = max - min;
@@ -117,22 +118,29 @@ function solveLinear(m, v) {
 }
 
 // The colour edges every spot has, from the middle out, and how far out each is in cm: gold to red,
-// red to blue, then blue to the black ring on a full face, or to the white paper on a triple spot.
+// red to blue, then on a full face blue to the black ring and black to the white ring, or on a triple
+// spot blue to the white paper.
 export const ringEdges = face => [
   { from: GOLD, to: RED, r: 4, name: 'gold/red' },
   { from: RED, to: BLUE, r: 8, name: 'red/blue' },
-  face === 'triple40' ? { from: BLUE, to: WHITE, r: 10, name: 'blue/white' } : { from: BLUE, to: DARK, r: 12, name: 'blue/black' },
+  ...(face === 'triple40'
+    ? [{ from: BLUE, to: WHITE, r: 10, name: 'blue/white' }]
+    : [{ from: BLUE, to: DARK, r: 12, name: 'blue/black' }, { from: DARK, to: WHITE, r: 16, name: 'black/white' }]),
 ];
 
 // Points where one ring's colour changes to the next, traced along rays from the gold's middle.
 // A change only counts when it's clean: the new colour starts within a few pixels of where the old one
 // was last seen, and carries on for a few pixels, so printed lines and small marks don't count. Where
 // an edge is blocked (by an arrow, a hole or the sticky note) the ray moves on to the next edge.
+// Each point goes where the new colour starts. Smaller edges are kept on fewer rays, in step with
+// their size, so their points aren't crowded together.
 function findEdges(p, cls, w, h, face) {
   const edges = ringEdges(face);
-  const GAP = 3, RUN = 3, N = 120;
+  const GAP = 3, RUN = 3, N = 180;
   const gold = Math.max(p.rx, p.ry);
-  const far = gold * (edges[edges.length - 1].r / 4) * 1.4;
+  const outer = edges[edges.length - 1].r;
+  const far = gold * (outer / 4) * 1.4;
+  const every = edges.map(e => Math.max(1, Math.round(outer / e.r)));
   const pts = [];
   for (let k = 0; k < N; k++) {
     const t = (k / N) * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t);
@@ -157,8 +165,7 @@ function findEdges(p, cls, w, h, face) {
       let run = true;
       for (let s = 0.5; s <= RUN; s += 0.5) if (at(r + s) !== edge.to) { run = false; break; }
       if (!run) continue;
-      const m = (r + lastFrom) / 2;
-      pts.push({ x: p.cx + m * dx, y: p.cy + m * dy, r: edge.r });
+      if (k % every[e] === 0) pts.push({ x: p.cx + r * dx, y: p.cy + r * dy, r: edge.r });
       e++;
       lastFrom = r;
     }
