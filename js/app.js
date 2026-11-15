@@ -569,8 +569,7 @@ function renderScore() {
           <button type="button" data-action="mode" data-m="keypad" class="${mode === 'keypad' ? 'on' : ''}">Keypad</button>
           <button type="button" data-action="mode" data-m="target" class="${mode === 'target' ? 'on' : ''}">Target</button>
         </div>` : ''}
-        ${full ? '' : `<label class="btn photo-btn">${ICONS.camera}<span>Photo</span>
-          <input type="file" accept="image/*" data-change="photo" hidden></label>`}
+        ${full ? '' : `<button type="button" class="btn photo-btn" data-action="photo-source">${ICONS.camera}<span>Photo</span></button>`}
       </div>
       <div class="entry mode-${mode}">${entry}</div>
       <div class="score-actions">
@@ -731,6 +730,23 @@ async function startPhoto(round, file) {
     console.error(e);
     toast('Could not open that photo');
   }
+}
+
+// Taking a photo and choosing one are separate choices, as newer Android photo pickers only offer
+// saved photos unless the camera is asked for.
+function renderPhotoSourceSheet() {
+  modal.hidden = false;
+  modal.innerHTML = `
+    <div class="sheet" role="dialog" aria-label="Score from a photo">
+      <h2>Score from a photo</h2>
+      <div class="stack">
+        <label class="btn block share-opt"><b>Take a photo</b><small>Opens the camera</small>
+          <input type="file" accept="image/*" capture="environment" data-change="photo" hidden></label>
+        <label class="btn block share-opt"><b>Choose a photo</b><small>One already on your phone</small>
+          <input type="file" accept="image/*" data-change="photo" hidden></label>
+      </div>
+      <button type="button" class="btn block" data-action="modal-close">Cancel</button>
+    </div>`;
 }
 
 // The arrow tapped at photo position pt: its score, and where it is on its spot.
@@ -1332,6 +1348,7 @@ function renderModal() {
   if (ui.sheet === 'share') return renderShareSheet();
   if (ui.sheet === 'plot' && ui.plot) return renderPlotSheet();
   if (ui.sheet === 'details') return renderDetailsSheet();
+  if (ui.sheet === 'photo-source') return renderPhotoSourceSheet();
   const ed = ui.editing;
   if (!ed) { modal.hidden = true; modal.innerHTML = ''; return; }
   const round = store.getRound(ed.roundId);
@@ -1758,6 +1775,7 @@ document.addEventListener('click', e => {
     case 'share': ui.sheet = 'share'; renderModal(); break;
     case 'details-open': ui.sheet = 'details'; renderModal(); break;
     case 'details-save': saveDetails(round); break;
+    case 'photo-source': ui.sheet = 'photo-source'; renderModal(); break;
     case 'photo-next': ui.photo.step = 'arrows'; render(); break;
     case 'photo-align': ui.photo.step = 'align'; render(); break;
     case 'photo-reset': ui.photo.spots = structuredClone(ui.photo.initial); render(); break;
@@ -1835,7 +1853,12 @@ document.addEventListener('change', async e => {
     return;
   }
   switch (el.dataset.change) {
-    case 'photo': startPhoto(store.getRound(current.id), el.files[0]); el.value = ''; break;
+    case 'photo': {
+      const file = el.files[0];
+      closeModal();
+      startPhoto(store.getRound(current.id), file);
+      break;
+    }
     case 'history-filter': ui.historyFilter = el.value; render(); break;
     case 'stats-archer': ui.statsArcher = el.value; ui.statsConfig = null; render(); break;
     case 'stats-config': ui.statsConfig = el.value; render(); break;
