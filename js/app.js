@@ -1272,7 +1272,7 @@ function renderSettings() {
       <div class="card rules">
         <p><b>World Archery 18m round:</b> 60 arrows shot as 20 ends of 3, in two halves of 10 ends. Highest possible score is 600.</p>
         <p><b>40cm full face:</b> rings score 10 down to 1. <b>Triple spot:</b> only 10 to 6 score; outside the 6 ring is a miss.</p>
-        <p><b>Recurve and barebow:</b> the whole 10 ring scores 10, and the inner ring is an X. <b>Compound:</b> only the inner ring scores 10.</p>
+        <p><b>Recurve, barebow, longbow and other bows:</b> the whole 10 ring scores 10, and the inner ring is an X. <b>Compound:</b> only the inner ring scores 10.</p>
         <p>An arrow touching a line scores the higher ring. Arrows are written highest first on the scorecard. Ties are ranked by number of 10s, then Xs.</p>
       </div>
 

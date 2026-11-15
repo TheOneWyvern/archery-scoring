@@ -15,7 +15,11 @@ export function roundSpec(round) {
   return tpl.practice ? { ...tpl, arrowsPerEnd: round.arrowsPerEnd || null } : tpl;
 }
 
-export const BOWS = { recurve: 'Recurve', compound: 'Compound', barebow: 'Barebow' };
+// Every bow except compound scores the whole 10 ring as 10, with the inner ring as an X.
+export const BOWS = {
+  recurve: 'Recurve', compound: 'Compound', barebow: 'Barebow', longbow: 'Longbow',
+  flatbow: 'Flatbow', traditional: 'Traditional', horsebow: 'Horse bow',
+};
 export const FACES = { full40: '40cm full face', triple40: '40cm triple spot' };
 
 export const X_RADIUS = 1;

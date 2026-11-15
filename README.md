@@ -7,7 +7,7 @@ A phone app for scoring indoor archery rounds. It installs from Chrome onto your
 ## What it does
 
 - **World Archery 18m round:** 60 arrows in 20 ends of 3, in two halves.
-- **Bows:** recurve, barebow and compound. Compound only scores 10 in the inner ring and has no separate X count.
+- **Bows:** recurve, compound, barebow, longbow, flatbow, traditional and horse bow. Compound only scores 10 in the inner ring and has no separate X count.
 - **Faces:** 40cm full face (rings 10–1) or triple spot (rings 10–6, anything outside is a miss).
 - **Practice rounds:** no set length, with a fixed number of arrows per end or no limit.
 - **Two ways to enter scores:** a keypad, or touching and dragging on the target face. Arrows touching a line score the higher ring, taking your arrow shaft diameter into account. Tap an arrow on the target to move it or change its score.
