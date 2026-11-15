@@ -72,16 +72,22 @@ export function locate(spots, pt) {
 
 // ---------- finding the target ----------
 
-const GOLD = 1, RED = 2, BLUE = 3;
+const GOLD = 1, RED = 2, BLUE = 3, DARK = 4, WHITE = 5;
 const DETECT_PX = 800;
 
-// Sorts each pixel into gold, red, blue or none by its hue, ignoring greys, whites and dark areas.
+// Sorts each pixel into gold, red or blue by its hue, or for greys, dark (the black ring, holes,
+// shadows) or white (the paper). Anything else is left as none.
 function classify(data) {
   const out = new Uint8Array(data.length / 4);
   for (let i = 0; i < out.length; i++) {
     const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    if (max < 90 || max - min < 0.4 * max) continue;
+    if (max < 90) { out[i] = DARK; continue; }
+    if (max - min < 0.4 * max) {
+      if (max < 115) out[i] = DARK;
+      else if (min > 150 && max - min < 0.2 * max) out[i] = WHITE;
+      continue;
+    }
     const d = max - min;
     let hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
     hue = (hue * 60 + 360) % 360;
@@ -110,74 +116,122 @@ function solveLinear(m, v) {
   return a.map((row, i) => row[n] / row[i]);
 }
 
-// The edge between red and blue (8cm out) traced along rays from the gold's middle. Rays blocked by
-// arrows, holes or the sticky note don't find red meeting blue, so they're left out.
-function redBlueEdge(p, cls, w, h) {
+// The colour edges every spot has, from the middle out, and how far out each is in cm: gold to red,
+// red to blue, then blue to the black ring on a full face, or to the white paper on a triple spot.
+export const ringEdges = face => [
+  { from: GOLD, to: RED, r: 4, name: 'gold/red' },
+  { from: RED, to: BLUE, r: 8, name: 'red/blue' },
+  face === 'triple40' ? { from: BLUE, to: WHITE, r: 10, name: 'blue/white' } : { from: BLUE, to: DARK, r: 12, name: 'blue/black' },
+];
+
+// Points where one ring's colour changes to the next, traced along rays from the gold's middle.
+// A change only counts when it's clean: the new colour starts within a few pixels of where the old one
+// was last seen, and carries on for a few pixels, so printed lines and small marks don't count. Where
+// an edge is blocked (by an arrow, a hole or the sticky note) the ray moves on to the next edge.
+function findEdges(p, cls, w, h, face) {
+  const edges = ringEdges(face);
+  const GAP = 3, RUN = 3, N = 120;
+  const gold = Math.max(p.rx, p.ry);
+  const far = gold * (edges[edges.length - 1].r / 4) * 1.4;
   const pts = [];
-  const N = 90;
-  const r0 = 1.2 * Math.max(p.rx, p.ry), r1 = 3 * Math.max(p.rx, p.ry);
   for (let k = 0; k < N; k++) {
     const t = (k / N) * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t);
-    let lastRed = -1;
-    for (let r = r0; r <= r1; r += 0.5) {
+    const at = r => {
       const x = Math.round(p.cx + r * dx), y = Math.round(p.cy + r * dy);
-      if (x < 0 || y < 0 || x >= w || y >= h) break;
-      const c = cls[y * w + x];
-      if (c === RED) lastRed = r;
-      else if (c === BLUE) {
-        // Only a clean change from red to blue counts.
-        if (lastRed > 0 && r - lastRed <= 3) pts.push({ x: p.cx + ((r + lastRed) / 2) * dx, y: p.cy + ((r + lastRed) / 2) * dy });
-        break;
-      } else if (lastRed > 0 && r - lastRed > 3) break;
+      return x < 0 || y < 0 || x >= w || y >= h ? -1 : cls[y * w + x];
+    };
+    let e = 0, lastFrom = -1;
+    for (let r = gold * 0.4; r <= far && e < edges.length; r += 0.5) {
+      const c = at(r);
+      if (c < 0) break;
+      const edge = edges[e];
+      if (c === edge.from) { lastFrom = r; continue; }
+      if (lastFrom < 0) continue;
+      if (r - lastFrom > GAP) {
+        // Something's in the way of this edge: look for the next one instead.
+        e++;
+        lastFrom = -1;
+        continue;
+      }
+      if (c !== edge.to) continue;
+      let run = true;
+      for (let s = 0.5; s <= RUN; s += 0.5) if (at(r + s) !== edge.to) { run = false; break; }
+      if (!run) continue;
+      const m = (r + lastFrom) / 2;
+      pts.push({ x: p.cx + m * dx, y: p.cy + m * dy, r: edge.r });
+      e++;
+      lastFrom = r;
     }
   }
   return pts;
 }
 
-// Fits an ellipse to the edge points: A·x² + B·xy + C·y² + D·x + E·y = 1. Returns its centre and
-// the map L that takes a circle of radius 1 onto it, or null if the points don't make an ellipse.
-function fitEllipse(pts) {
+// Fits rings of known sizes (each point's r, in cm) that share one centre and one shape:
+// (p − c)ᵀ·S·(p − c) = r². Written out that's a·x² + 2b·xy + d·y² + u·x + v·y + w = r², which is
+// linear in a, b, d, u, v and w, so it's solved by least squares. Returns the centre and L = S^(-1/2),
+// which turns cm from the centre into photo pixels, or null if the points don't make rings.
+function fitRings(pts) {
   if (pts.length < 12) return null;
   // Points are taken relative to their mean, which keeps the sums well behaved.
   const mx = pts.reduce((s, q) => s + q.x, 0) / pts.length, my = pts.reduce((s, q) => s + q.y, 0) / pts.length;
-  const M = Array.from({ length: 5 }, () => new Array(5).fill(0)), V = new Array(5).fill(0);
+  const M = Array.from({ length: 6 }, () => new Array(6).fill(0)), V = new Array(6).fill(0);
   for (const q of pts) {
     const x = q.x - mx, y = q.y - my;
-    const row = [x * x, x * y, y * y, x, y];
-    for (let i = 0; i < 5; i++) { V[i] += row[i]; for (let j = 0; j < 5; j++) M[i][j] += row[i] * row[j]; }
+    // Each point is weighted by 1 / 2r, so a miss on any ring counts about the same in cm.
+    const wt = 1 / (2 * q.r);
+    const row = [x * x, 2 * x * y, y * y, x, y, 1].map(v => v * wt), rhs = q.r * q.r * wt;
+    for (let i = 0; i < 6; i++) { V[i] += row[i] * rhs; for (let j = 0; j < 6; j++) M[i][j] += row[i] * row[j]; }
   }
   const s = solveLinear(M, V);
   if (!s) return null;
-  const [A, B, C, D, E] = s;
-  if (4 * A * C - B * B <= 0) return null;
-  // Centre where the gradient is zero. Around it the ellipse is pᵀ·S·p = 1 − (its left side at the
-  // centre), so S is scaled by that.
-  const c = solveLinear([[2 * A, B], [B, 2 * C]], [-D, -E]);
+  const [a, b, d, u, v] = s;
+  if (a <= 0 || a * d - b * b <= 0) return null;
+  // The centre is where the gradient is zero.
+  const c = solveLinear([[2 * a, 2 * b], [2 * b, 2 * d]], [-u, -v]);
   if (!c) return null;
-  const k = 1 - (A * c[0] * c[0] + B * c[0] * c[1] + C * c[1] * c[1] + D * c[0] + E * c[1]);
-  if (k <= 0) return null;
-  const a = A / k, b = B / 2 / k, d = C / k;
   // L = S^(-1/2), from the eigenvalues and eigenvectors of the 2×2 symmetric matrix S.
-  const tr = a + d, det = a * d - b * b, disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - det));
+  const tr = a + d, disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - (a * d - b * b)));
   const l1 = tr / 2 + disc, l2 = tr / 2 - disc;
   if (l2 <= 0) return null;
   const ang = Math.abs(b) < 1e-12 ? (a >= d ? 0 : Math.PI / 2) : Math.atan2(l1 - a, b);
   const cs = Math.cos(ang), sn = Math.sin(ang), s1 = 1 / Math.sqrt(l1), s2 = 1 / Math.sqrt(l2);
   const L = [[cs * cs * s1 + sn * sn * s2, cs * sn * (s1 - s2)], [cs * sn * (s1 - s2), sn * sn * s1 + cs * cs * s2]];
-  return { cx: c[0] + mx, cy: c[1] + my, L };
+  return { x: c[0] + mx, y: c[1] + my, L };
 }
 
-// The spot's middle and shape from the red and blue edge, falling back to the gold patch alone.
-// `note`, if given, records the edge points and which was used.
-function spotShape(p, cls, w, h, note = null) {
-  const edge = redBlueEdge(p, cls, w, h);
-  const fit = fitEllipse(edge);
-  // Sanity check: the edge should be about twice the gold's radius out.
-  const r = fit && Math.sqrt(Math.abs(fit.L[0][0] * fit.L[1][1] - fit.L[0][1] * fit.L[1][0]));
-  const good = fit && r > 1.5 * Math.min(p.rx, p.ry) && r < 2.8 * Math.max(p.rx, p.ry);
-  if (note) Object.assign(note, { edge, from: good ? 'red/blue edge' : fit ? 'gold (edge fit out of range)' : 'gold (too few edge points)' });
-  // L maps a radius of 1 to the 8cm edge, so per centimetre it's L / 8.
-  if (good) return { cx: fit.cx, cy: fit.cy, L: fit.L.map(row => row.map(v => v / 8)) };
+// How far a point is from a fit's ring for its edge, in cm.
+const offRing = (fit, q) => { const u = photoToSpot(fit, q); return Math.hypot(u.x, u.y) - q.r; };
+
+// Fits the rings, then refits without points that are clearly off (on a hole, an arrow shaft or
+// the wrong colour change), tightening each time.
+function fitRobust(pts) {
+  let use = pts, fit = null;
+  for (const limit of [1, 0.4, 0.25]) {
+    fit = fitRings(use);
+    if (!fit) return null;
+    use = pts.filter(q => Math.abs(offRing(fit, q)) < limit);
+  }
+  fit = fitRings(use);
+  return fit && { ...fit, used: new Set(use) };
+}
+
+// The spot's middle and shape from its colour edges, falling back to the gold patch alone.
+// `note`, if given, records the edge points (marking those left out of the fit) and what was used.
+function spotShape(p, cls, w, h, face, note = null) {
+  const edge = findEdges(p, cls, w, h, face);
+  const fit = fitRobust(edge);
+  // Sanity check: the gold is 4cm in radius, so the fitted size should be close to its radius / 4.
+  const size = fit && Math.sqrt(Math.abs(fit.L[0][0] * fit.L[1][1] - fit.L[0][1] * fit.L[1][0]));
+  const fromGold = (p.rx + p.ry) / 2 / 4;
+  const good = fit && size > 0.7 * fromGold && size < 1.4 * fromGold;
+  if (note) {
+    const counts = ringEdges(face).map(e => `${e.name} ${edge.filter(q => q.r === e.r && fit?.used.has(q)).length}`);
+    Object.assign(note, {
+      edge: edge.map(q => ({ ...q, used: !!fit?.used.has(q) })),
+      from: good ? `rings (${counts.join(', ')})` : fit ? 'gold (ring fit out of range)' : 'gold (too few edge points)',
+    });
+  }
+  if (good) return { cx: fit.x, cy: fit.y, L: fit.L };
   return { cx: p.cx, cy: p.cy, L: [[p.rx / 4, 0], [0, p.ry / 4]] };
 }
 
@@ -292,8 +346,8 @@ export function findFace(canvas, face, debug = null) {
   if (!picked) return null;
   // Each found spot's centre and shape is measured. Guessed spots take the shape of the nearest
   // measured one.
-  const measured = picked.map((p, i) => (p.area ? spotShape(p, cls, w, h, notes[i]) : null));
-  if (debug) notes.forEach(n => { n.edge = (n.edge || []).map(q => ({ x: q.x / k, y: q.y / k })); });
+  const measured = picked.map((p, i) => (p.area ? spotShape(p, cls, w, h, face, notes[i]) : null));
+  if (debug) notes.forEach(n => { n.edge = (n.edge || []).map(q => ({ ...q, x: q.x / k, y: q.y / k })); });
   return picked.map((p, i) => {
     const m = measured[i] || measured[i === 0 ? 1 : i - 1] || measured.find(Boolean);
     const cx = measured[i] ? m.cx : p.cx, cy = measured[i] ? m.cy : p.cy;
@@ -302,4 +356,4 @@ export function findFace(canvas, face, debug = null) {
 }
 
 // The colour classes in a debug report's `cls`.
-export const COLOURS = { GOLD, RED, BLUE };
+export const COLOURS = { GOLD, RED, BLUE, DARK, WHITE };
