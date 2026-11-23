@@ -480,3 +480,19 @@ button.plot:active { background: var(--surface-2); }
 }
 .toast[hidden] { display: none; }
 .toast button { border: 0; background: #ffe047; color: #14263b; font-weight: 700; padding: 6px 12px; border-radius: 8px; }
+
+/* ---------- new app banner ---------- */
+
+.moved-banner {
+  position: relative;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
+  border-left: 5px solid var(--blue);
+  padding: 12px 44px 12px 14px; margin-bottom: 16px; font-size: 15px;
+}
+.moved-banner p { margin: 0 0 10px; }
+.moved-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.moved-btn { min-height: 40px; padding: 0 14px; }
+.moved-link { font-weight: 600; font-size: 15px; }
+.moved-close { position: absolute; top: 4px; right: 4px; color: var(--muted); }
+.moved-close:active { background: var(--surface-2); }
+.moved-close svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
