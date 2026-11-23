@@ -51,7 +51,7 @@ const modal = document.getElementById('modal');
 const ui = {
   // sheet is the open bottom sheet other than editing: 'share' or 'plot'. plot is the arrow plot on screen.
   editing: null, restoring: false, sheet: null, plot: null, justFinished: new Set(),
-  historyFilter: 'all', statsArcher: null, statsConfig: null, newArchers: null,
+  historyFilter: 'all', statsArcher: null, statsConfig: null, newArchers: null, movedHidden: false,
 };
 
 // ---------- helpers ----------
@@ -174,6 +174,7 @@ const ICONS = {
   target: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></svg>',
   card: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>',
   camera: '<svg viewBox="0 0 24 24"><path d="M3 8h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13.5" r="3.5" /></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>',
 };
 
 // ---------- routing ----------
@@ -252,6 +253,55 @@ function isPersonalBest(round) {
 
 // ---------- home ----------
 
+// ---------- the new app ----------
+
+// The app has a newer home. The old one keeps working, so the banner only points the way and can be
+// hidden. "Move my scores" opens the new app with this phone's backup code after the #, which the
+// new app reads as <address>#/import/<backup code> and offers to import in one tap, skipping rounds
+// it already has. The code never reaches a server because browsers don't send the part after the #.
+const NEW_APP_URL = 'https://archery-scoring.curtis-wyvern.workers.dev/';
+const MOVED_HIDDEN_KEY = 'archery-moved-banner-hidden';
+
+function movedBannerHidden() {
+  try { return localStorage.getItem(MOVED_HIDDEN_KEY) === '1'; } catch { return false; }
+}
+
+function hideMovedBanner() {
+  try { localStorage.setItem(MOVED_HIDDEN_KEY, '1'); } catch { /* storage blocked: hide for now only */ }
+  ui.movedHidden = true;
+  if (current.name === '') render();
+  toast('Hidden. You can still move your scores from Settings.');
+}
+
+function movedBannerHTML() {
+  if (ui.movedHidden || movedBannerHidden()) return '';
+  return `
+    <div class="moved-banner" role="note">
+      <p><b>There's a new version of this app.</b> You can keep using this one too.</p>
+      <div class="moved-actions">
+        <button type="button" class="btn moved-btn" data-action="move-scores">Move my scores</button>
+        <a class="moved-link" href="${NEW_APP_URL}" target="_blank" rel="noopener">Open new app</a>
+      </div>
+      <button type="button" class="icon-btn moved-close" data-action="moved-hide" aria-label="Hide this message">${ICONS.close}</button>
+    </div>`;
+}
+
+async function moveScores() {
+  let url = NEW_APP_URL;
+  if (store.getRounds().length) {
+    try {
+      url += '#/import/' + await encodeBackup(store.exportJSON());
+    } catch {
+      toast("Couldn't pack up the scores here. Copy a backup code in Settings instead.");
+      return;
+    }
+  }
+  // A new tab keeps this app where it was. If the phone blocks that, go there in this tab.
+  // ("noopener" isn't passed because window.open then returns null even when the tab opened.)
+  const tab = window.open(url, '_blank');
+  if (tab) tab.opener = null; else location.href = url;
+}
+
 function renderHome() {
   const rounds = store.getRounds();
   const recent = rounds.filter(r => r.finishedAt).slice(0, 5);
@@ -304,7 +354,7 @@ function renderHome() {
 
   app.innerHTML = shell({
     title: 'Archery Scoring',
-    body: `${activeHtml}<a class="btn primary block big" href="#/new">+ Start new round</a>${empty}${bestHtml}${recentHtml}`,
+    body: `${movedBannerHTML()}${activeHtml}<a class="btn primary block big" href="#/new">+ Start new round</a>${empty}${bestHtml}${recentHtml}`,
   });
 }
 
@@ -1677,6 +1727,12 @@ function renderSettings() {
         </label>
       </div>
 
+      <h2 class="section">New version of this app</h2>
+      <div class="card">
+        <p class="muted small-print">There's a new version at <a href="${NEW_APP_URL}" target="_blank" rel="noopener">${NEW_APP_URL.replace(/^https:\/\/|\/$/g, '')}</a>. Move my scores opens it with all your rounds ready to import in one tap. Rounds already there aren't copied twice, and nothing here is removed.</p>
+        <button type="button" class="btn block" data-action="move-scores">Move my scores</button>
+      </div>
+
       <h2 class="section">Backup</h2>
       <div class="card">
         <p class="muted small-print">Your scores are saved only on this phone. Export a backup now and then so you don't lose them if you change phones or clear Chrome's data.</p>
@@ -1812,6 +1868,8 @@ document.addEventListener('click', e => {
     case 'export-json': download(`archery-backup-${today()}.json`, store.exportJSON(), 'application/json'); break;
     case 'export-csv': exportCSV(); break;
     case 'copy-code': copyBackupCode(); break;
+    case 'move-scores': moveScores(); break;
+    case 'moved-hide': hideMovedBanner(); break;
     case 'restore-open': ui.restoring = true; renderModal(); $('#restore-code').focus(); break;
     case 'restore-paste':
       navigator.clipboard.readText()

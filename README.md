@@ -2,7 +2,13 @@
 
 A phone app for scoring indoor archery rounds. It installs from Chrome onto your home screen and works offline.
 
-**Open the app: https://theonewyvern.github.io/archery-scoring/**
+> **This app has a new version: https://archery-scoring.curtis-wyvern.workers.dev/**
+> Its code is in [archery-scoring-next](https://github.com/TheOneWyvern/archery-scoring-next).
+> This older version still works and stays online. To bring your scores across, tap
+> **Move my scores** on its home screen or in Settings, then tap **Import** in the new app.
+> Rounds the new app already has are skipped, and nothing in this app is removed.
+
+**Open this older app: https://theonewyvern.github.io/archery-scoring/**
 
 ## What it does
 
