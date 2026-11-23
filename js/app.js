@@ -8,6 +8,7 @@ import {
   hasPos, snapToScore, markerPos,
 } from './face.js';
 import { plotSVG, plotPNG, scorecardPNG, shareFile, saveFile, canShareFiles } from './share.js';
+import { printCardHTML } from './printcard.js';
 import { findFace, defaultSpots, handlesFor, moveHandle, locate, edgeCm, ringPath, spotToFractions } from './photo.js';
 import {
   CLASSES, CLAIM_ARROWS, AGE_GROUPS, GENDERS, ESTIMATE_MIN_ARROWS, WA18_ARROWS, classify, estimate, hasClassTable,
@@ -1055,8 +1056,22 @@ function renderRound() {
         <button type="button" class="btn" data-action="share">Share score</button>
         <button type="button" class="btn" data-action="details-open">Edit details</button>
       </div>
-      <button type="button" class="btn danger block delete-round" data-action="delete-round">Delete round</button>`,
+      <button type="button" class="btn danger block delete-round" data-action="delete-round">Delete round</button>
+      ${printCardHTML(round, printInfo(round))}`,
   });
+}
+
+// The details at the top of the printed score sheet.
+function printInfo(round) {
+  const prof = profileOf(round);
+  const reached = classOf(round)?.reached;
+  return {
+    archer: nameOf(round) === 'Me' ? '' : nameOf(round),
+    category: [GENDERS[prof.gender], AGE_GROUPS[prof.age]].filter(Boolean).join(' '),
+    date: fmtDate(round.date),
+    location: round.location || '',
+    classification: reached ? `${reached.name} (${reached.code})` : '',
+  };
 }
 
 // Changes a round's bow, date, location, notes, and the age group and category it's classified by.
@@ -1218,7 +1233,7 @@ function renderShareSheet() {
       <div class="stack">
         <button type="button" class="btn block share-opt" data-action="share-image"><b>Picture</b><small>The whole scorecard as an image</small></button>
         <button type="button" class="btn block share-opt" data-action="share-text"><b>Text</b><small>A short summary with the total</small></button>
-        <button type="button" class="btn block share-opt" data-action="share-pdf"><b>PDF</b><small>Print the scorecard, or choose Save as PDF</small></button>
+        <button type="button" class="btn block share-opt" data-action="share-pdf"><b>Score sheet (PDF)</b><small>A printable score sheet with signature lines. Print it, or choose Save as PDF</small></button>
         <button type="button" class="btn block share-opt" data-action="share-json"><b>Data file</b><small>This round as .json, which Import backup can read</small></button>
       </div>
       <button type="button" class="btn block" data-action="modal-close">Cancel</button>
